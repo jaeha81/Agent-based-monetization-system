@@ -12,11 +12,15 @@ import {
   Zap,
   Bot,
   Settings,
+  Cpu,
+  BarChart2,
 } from 'lucide-react'
 
 const NAV = [
   { href: '/', label: '대시보드', icon: LayoutDashboard },
-  { href: '/automation', label: '자동화 제어', icon: Bot, highlight: true },
+  { href: '/agents', label: '에이전트 현황', icon: Cpu, highlight: true },
+  { href: '/automation', label: '자동화 제어', icon: Bot },
+  { href: '/revenue-structure', label: '수익 구조', icon: BarChart2 },
   { href: '/products', label: '제품 발굴', icon: Search },
   { href: '/content', label: '콘텐츠 생성', icon: FileVideo },
   { href: '/accounts', label: '계정 관리', icon: Users },

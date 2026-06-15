@@ -107,6 +107,65 @@ function initSchema(db: Database.Database) {
       value TEXT NOT NULL,
       updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS agent_states (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_name TEXT UNIQUE NOT NULL,
+      status TEXT DEFAULT 'idle',
+      current_task TEXT,
+      last_result TEXT,
+      total_runs INTEGER DEFAULT 0,
+      success_runs INTEGER DEFAULT 0,
+      revenue_contributed INTEGER DEFAULT 0,
+      last_run_at TEXT,
+      next_run_at TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_name TEXT NOT NULL,
+      task_type TEXT NOT NULL,
+      task_data TEXT,
+      status TEXT DEFAULT 'pending',
+      result TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      started_at TEXT,
+      completed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS evolution_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cycle INTEGER NOT NULL DEFAULT 1,
+      insights TEXT,
+      strategy_changes TEXT,
+      top_product TEXT,
+      top_platform TEXT,
+      top_hook TEXT,
+      performance_delta INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS revenue_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_type TEXT NOT NULL,
+      account_name TEXT,
+      bank_name TEXT,
+      account_number_masked TEXT,
+      account_holder TEXT,
+      is_verified INTEGER DEFAULT 0,
+      total_received INTEGER DEFAULT 0,
+      last_settled_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    INSERT OR IGNORE INTO agent_states (agent_name, status)
+    VALUES
+      ('trend_agent', 'idle'),
+      ('content_agent', 'idle'),
+      ('publish_agent', 'idle'),
+      ('revenue_agent', 'idle'),
+      ('evolution_agent', 'idle');
   `)
 
   const count = (db.prepare('SELECT COUNT(*) as c FROM products').get() as { c: number }).c

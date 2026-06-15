@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { runDailyAutomation } from '@/lib/automation-engine'
+import { runFullCycle } from '@/lib/agents/orchestrator'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -14,14 +14,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  console.log('[Cron/Daily] 자율 수익화 파이프라인 시작')
+  console.log('[Cron/Daily] Bucky 오케스트레이터 사이클 시작')
   const started = Date.now()
 
   try {
-    const result = await runDailyAutomation()
+    const result = await runFullCycle()
     const elapsed = ((Date.now() - started) / 1000).toFixed(1)
-
-    console.log(`[Cron/Daily] 완료 — ${elapsed}s`, result)
+    console.log(`[Cron/Daily] 완료 — ${elapsed}s`, {
+      revenue: result.totalRevenueAdded,
+      insights: result.evolutionInsights.slice(0, 80),
+    })
     return NextResponse.json({ ok: true, elapsed: `${elapsed}s`, ...result })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
