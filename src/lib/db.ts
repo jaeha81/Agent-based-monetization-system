@@ -1,7 +1,16 @@
 import Database from 'better-sqlite3'
 import path from 'path'
+import fs from 'fs'
 
-const DB_PATH = path.join(process.cwd(), 'data', 'shorts.db')
+const isVercel = !!process.env.VERCEL
+const DB_PATH = isVercel
+  ? '/tmp/shorts.db'
+  : path.join(process.cwd(), 'data', 'shorts.db')
+
+if (!isVercel) {
+  const dir = path.dirname(DB_PATH)
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+}
 
 let db: Database.Database | null = null
 
@@ -57,6 +66,46 @@ function initSchema(db: Database.Database) {
       amount INTEGER NOT NULL,
       commission_type TEXT DEFAULT 'coupang_partners',
       logged_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS automation_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_type TEXT NOT NULL,
+      status TEXT DEFAULT 'running',
+      products_found INTEGER DEFAULT 0,
+      content_generated INTEGER DEFAULT 0,
+      posts_published INTEGER DEFAULT 0,
+      error TEXT,
+      started_at TEXT DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS scheduled_posts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content_id INTEGER REFERENCES content(id),
+      platform TEXT NOT NULL,
+      scheduled_for TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      youtube_video_id TEXT,
+      published_at TEXT,
+      error TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS click_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content_id INTEGER REFERENCES content(id),
+      product_id INTEGER REFERENCES products(id),
+      affiliate_url TEXT,
+      ip_hash TEXT,
+      user_agent TEXT,
+      clicked_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
     );
   `)
 
@@ -226,4 +275,28 @@ export type RevenueLog = {
   amount: number
   commission_type: string
   logged_at: string
+}
+
+export type AutomationRun = {
+  id: number
+  run_type: string
+  status: string
+  products_found: number
+  content_generated: number
+  posts_published: number
+  error: string | null
+  started_at: string
+  finished_at: string | null
+}
+
+export type ScheduledPost = {
+  id: number
+  content_id: number
+  platform: string
+  scheduled_for: string
+  status: string
+  youtube_video_id: string | null
+  published_at: string | null
+  error: string | null
+  created_at: string
 }

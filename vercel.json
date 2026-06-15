@@ -1,0 +1,24 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/daily",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/publish",
+      "schedule": "0 9,18 * * *"
+    },
+    {
+      "path": "/api/cron/revenue-sync",
+      "schedule": "0 * * * *"
+    }
+  ],
+  "functions": {
+    "src/app/api/**": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/**": {
+      "maxDuration": 300
+    }
+  }
+}
