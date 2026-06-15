@@ -3,6 +3,7 @@ import crypto from 'crypto'
 const BASE_URL = 'https://api-gateway.coupang.com'
 const ACCESS_KEY = process.env.COUPANG_ACCESS_KEY || ''
 const SECRET_KEY = process.env.COUPANG_SECRET_KEY || ''
+const CHANNEL_ID = process.env.COUPANG_CHANNEL_ID || 'AF5520196'
 
 function generateHmacSignature(
   method: string,
@@ -89,9 +90,11 @@ export async function generateAffiliateLink(
   productId: number
 ): Promise<AffiliateLink> {
   if (!ACCESS_KEY || !SECRET_KEY) {
+    // 채널 ID로 실제 추적 링크 생성 (API 키 불필요)
+    const trackedUrl = `https://link.coupang.com/a/${CHANNEL_ID}?url=${encodeURIComponent(productUrl)}`
     return {
       productId,
-      shortUrl: `https://coupa.ng/mock${productId}`,
+      shortUrl: trackedUrl,
       originalUrl: productUrl,
       commissionRate: 3.0,
     }
