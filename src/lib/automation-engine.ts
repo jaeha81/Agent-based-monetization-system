@@ -3,6 +3,7 @@ import { searchTrendingProducts, generateAffiliateLink, getCategoryCommissionRat
 import { runTrendAgent } from '@/lib/agents/trend-agent'
 import { runContentAgent } from '@/lib/agents/content-agent'
 import { buildShortsDescription, buildShortsTags } from '@/lib/youtube'
+import { sendDiscordWebhook, makeEmbed, COLORS } from '@/lib/discord'
 
 export interface AutomationResult {
   runId: number
@@ -141,7 +142,21 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
       [productsFound, contentGenerated, scheduled, runId]
     )
 
-    return { runId, productsFound, contentGenerated, scheduled, errors }
+    const result: AutomationResult = { runId, productsFound, contentGenerated, scheduled, errors }
+
+    const notifyUrl = process.env.DISCORD_NOTIFY_WEBHOOK
+    if (notifyUrl) {
+      sendDiscordWebhook(notifyUrl, '', [
+        makeEmbed('✅ 자동화 실행 완료', `실행 ID: **${runId}**`, COLORS.green, [
+          { name: '제품 발견', value: String(productsFound), inline: true },
+          { name: '콘텐츠 생성', value: String(contentGenerated), inline: true },
+          { name: '스케줄 등록', value: String(scheduled), inline: true },
+          ...(errors.length > 0 ? [{ name: '오류', value: errors.slice(0, 3).join('\n') }] : []),
+        ]),
+      ]).catch(e => console.error('[Automation] Discord notify 실패:', e))
+    }
+
+    return result
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     await execute(
@@ -218,39 +233,36 @@ export async function publishScheduledPosts(): Promise<{
 }
 
 export async function getAutomationStatus() {
-  const lastRun = await queryOne<{
-    id: number; run_type: string; status: string
-    products_found: number; content_generated: number
-    posts_published: number; error: string | null
-    started_at: string; finished_at: string | null
-  }>('SELECT * FROM automation_runs ORDER BY id DESC LIMIT 1')
+  const [
+    runsRaw,
+    pendingRaw,
+    todayRaw,
+    scheduledRaw,
+  ] = await Promise.all([
+    query('SELECT id, run_type, status, products_found, content_generated, posts_published, error, started_at, finished_at FROM automation_runs ORDER BY id DESC LIMIT 10'),
+    query(`SELECT COUNT(*) as c FROM scheduled_posts WHERE status = 'pending'`),
+    query(`SELECT COUNT(*) as c FROM scheduled_posts WHERE status = 'published' AND published_at >= date('now')`),
+    query(
+      `SELECT sp.scheduled_for, c.platform, p.name as product_name
+       FROM scheduled_posts sp
+       JOIN content c ON sp.content_id = c.id
+       JOIN products p ON c.product_id = p.id
+       WHERE sp.status = 'pending'
+       ORDER BY sp.scheduled_for ASC LIMIT 5`
+    ),
+  ])
 
-  const pendingRow = await queryOne<{ c: number }>(
-    `SELECT COUNT(*) as c FROM scheduled_posts WHERE status = 'pending'`
-  )
-  const pendingPosts = pendingRow?.c ?? 0
-
-  const todayRow = await queryOne<{ c: number }>(
-    `SELECT COUNT(*) as c FROM scheduled_posts WHERE status = 'published' AND published_at >= date('now')`
-  )
-  const todayPublished = todayRow?.c ?? 0
-
-  const recentRuns = await query<{
+  const recentRuns = runsRaw as Array<{
     id: number; run_type: string; status: string
     products_found: number; content_generated: number
     posts_published: number; started_at: string
-  }>('SELECT * FROM automation_runs ORDER BY id DESC LIMIT 10')
-
-  const nextScheduled = await query<{
+  }>
+  const lastRun = recentRuns[0] ?? null
+  const pendingPosts = Number((pendingRaw[0] as { c: number | bigint } | undefined)?.c ?? 0)
+  const todayPublished = Number((todayRaw[0] as { c: number | bigint } | undefined)?.c ?? 0)
+  const nextScheduled = scheduledRaw as Array<{
     scheduled_for: string; platform: string; product_name: string
-  }>(
-    `SELECT sp.scheduled_for, c.platform, p.name as product_name
-     FROM scheduled_posts sp
-     JOIN content c ON sp.content_id = c.id
-     JOIN products p ON c.product_id = p.id
-     WHERE sp.status = 'pending'
-     ORDER BY sp.scheduled_for ASC LIMIT 5`
-  )
+  }>
 
   return { lastRun, pendingPosts, todayPublished, recentRuns, nextScheduled }
 }

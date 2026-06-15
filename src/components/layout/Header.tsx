@@ -1,6 +1,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { Zap } from 'lucide-react'
 import MobileNav from './MobileNav'
 
@@ -20,6 +21,20 @@ const TITLES: Record<string, string> = {
 export default function Header() {
   const pathname = usePathname()
   const title = TITLES[pathname] || '쇼츠 수익화'
+  const [isMock, setIsMock] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    fetch('/api/diagnostics')
+      .then(r => r.json())
+      .then(d => setIsMock(d.mock_mode === 'true' || d.mock_mode === true))
+      .catch(() => setIsMock(null))
+  }, [])
+
+  const badge = isMock === null
+    ? null
+    : isMock
+      ? <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full font-medium">Mock 모드</span>
+      : <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">🟢 라이브</span>
 
   return (
     <header className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200 shrink-0 sticky top-0 z-30">
@@ -32,9 +47,7 @@ export default function Header() {
         <h1 className="hidden md:block font-semibold text-gray-800">{title}</h1>
       </div>
       <div className="flex items-center gap-2">
-        <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
-          Mock 모드
-        </span>
+        {badge}
       </div>
     </header>
   )

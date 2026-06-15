@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   const category = searchParams.get('category')
   const limit = Number(searchParams.get('limit') || 20)
 
-  let sql = 'SELECT * FROM products'
+  let sql = 'SELECT id, name, category, coupang_url, commission_rate, viral_score, estimated_revenue, created_at FROM products'
   const params: (null | string | number)[] = []
 
   if (category && category !== '전체') {

@@ -12,6 +12,10 @@ const withPWA = withPWAInit({
 })
 
 /** @type {import('next').NextConfig} */
-const nextConfig = {}
+const nextConfig = {
+  experimental: {
+    after: true,
+  },
+}
 
 export default withPWA(nextConfig)

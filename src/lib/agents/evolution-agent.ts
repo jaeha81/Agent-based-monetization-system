@@ -1,5 +1,5 @@
 import { query, queryOne, execute } from '@/lib/db'
-import { anthropic, USE_MOCK } from '@/lib/claude-client'
+import { USE_MOCK, generateJSON } from '@/lib/claude-client'
 
 export interface EvolutionResult {
   insights: string
@@ -24,7 +24,7 @@ export async function getLatestStrategy(): Promise<Strategy> {
     top_platform: string | null
     top_hook: string | null
     strategy_changes: string | null
-  }>(`SELECT * FROM evolution_log ORDER BY id DESC LIMIT 1`)
+  }>(`SELECT top_product, top_platform, top_hook, strategy_changes FROM evolution_log ORDER BY id DESC LIMIT 1`)
 
   const defaultStrategy: Strategy = {
     topKeyword: '다이소 핫템',
@@ -102,12 +102,11 @@ export async function runEvolutionAgent(): Promise<EvolutionResult> {
   const topHook = topContent[0]?.hook || '이거 다이소에서 파는 거 맞아??'
   const topCategory = categoryPerf[0]?.category || '뷰티'
 
-  if (USE_MOCK || !process.env.ANTHROPIC_API_KEY) {
+  if (USE_MOCK || !process.env.GEMINI_API_KEY) {
     const insights = buildMockInsights(topProduct, topPlatform, topHook, topCategory, prevWeekRev)
     return saveAndReturn(insights, topProduct, topPlatform, topHook, prevWeekRev)
   }
 
-  // Claude API로 실제 인사이트 생성
   const perfSummary = JSON.stringify({
     topContent: topContent.slice(0, 5),
     platformPerformance: platformPerf,
@@ -116,26 +115,11 @@ export async function runEvolutionAgent(): Promise<EvolutionResult> {
   })
 
   try {
-    const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      messages: [{
-        role: 'user',
-        content: `쇼핑숏츠 자율수익화 성과 데이터를 분석하고 다음 사이클 전략을 한국어로 3-4줄로 제안해주세요.
-
-데이터:
-${perfSummary}
-
-다음 형식으로만 답변하세요:
-[인사이트] ...
-[추천 키워드] ...
-[추천 플랫폼] ...
-[전략 변경] ...`
-      }],
-    })
-
-    const text = msg.content[0].type === 'text' ? msg.content[0].text : ''
-    return saveAndReturn(text || buildMockInsights(topProduct, topPlatform, topHook, topCategory, prevWeekRev),
+    const result = await generateJSON<{ insights: string }>(
+      '당신은 쇼핑숏츠 수익화 전략 분석가입니다. 성과 데이터를 분석하고 JSON 형식으로만 응답합니다.',
+      `쇼핑숏츠 성과 데이터를 분석하고 다음 사이클 전략을 제안해주세요.\n\n데이터:\n${perfSummary}\n\n다음 형식으로 응답:\n{"insights": "[인사이트] ...\\n[추천 키워드] ...\\n[추천 플랫폼] ...\\n[전략 변경] ..."}`
+    )
+    return saveAndReturn(result.insights || buildMockInsights(topProduct, topPlatform, topHook, topCategory, prevWeekRev),
       topProduct, topPlatform, topHook, prevWeekRev)
   } catch {
     const insights = buildMockInsights(topProduct, topPlatform, topHook, topCategory, prevWeekRev)

@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const platform = searchParams.get('platform')
 
-  let sql = 'SELECT * FROM accounts'
+  let sql = 'SELECT id, platform, username, followers, total_revenue, post_count, status FROM accounts'
   const params: (null | string | number)[] = []
 
   if (platform) {

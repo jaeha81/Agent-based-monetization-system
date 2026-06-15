@@ -39,7 +39,14 @@ export type DbArgs = (null | string | number | bigint | boolean | ArrayBuffer | 
 export async function query<T = Record<string, unknown>>(sql: string, args: DbArgs = []): Promise<T[]> {
   const client = await ensureInit()
   const r = await client.execute({ sql, args })
-  return r.rows as unknown as T[]
+  return r.rows.map(row => {
+    const obj: Record<string, unknown> = {}
+    for (const col of r.columns) {
+      const v = row[col]
+      obj[col] = typeof v === 'bigint' ? Number(v) : (v ?? null)
+    }
+    return obj
+  }) as unknown as T[]
 }
 
 export async function queryOne<T = Record<string, unknown>>(sql: string, args: DbArgs = []): Promise<T | undefined> {

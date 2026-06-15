@@ -138,7 +138,7 @@ export async function runFullCycle(): Promise<OrchestratorResult> {
   try {
     for (const productId of newProductIds.slice(0, 3)) {
       const product = await queryOne<{ id: number; name: string; category: string }>(
-        'SELECT * FROM products WHERE id = ?', [productId]
+        'SELECT id, name, category FROM products WHERE id = ?', [productId]
       )
       if (!product) continue
 
@@ -263,24 +263,24 @@ export async function getAgentDashboard() {
     current_task: string | null; last_result: string | null
     total_runs: number; success_runs: number
     revenue_contributed: number; last_run_at: string | null; next_run_at: string | null
-  }>(`SELECT * FROM agent_states ORDER BY id`)
+  }>(`SELECT id, agent_name, status, current_task, last_result, total_runs, success_runs, revenue_contributed, last_run_at, next_run_at FROM agent_states ORDER BY id`)
 
   const recentTasks = await query<{
     id: number; agent_name: string; task_type: string
     status: string; result: string | null; created_at: string; completed_at: string | null
-  }>(`SELECT * FROM agent_tasks ORDER BY id DESC LIMIT 30`)
+  }>(`SELECT id, agent_name, task_type, status, result, created_at, completed_at FROM agent_tasks ORDER BY id DESC LIMIT 30`)
 
   const evolutionHistory = await query<{
     id: number; cycle: number; insights: string | null
     strategy_changes: string | null; top_product: string | null
     top_platform: string | null; performance_delta: number; created_at: string
-  }>(`SELECT * FROM evolution_log ORDER BY id DESC LIMIT 5`)
+  }>(`SELECT id, cycle, insights, strategy_changes, top_product, top_platform, performance_delta, created_at FROM evolution_log ORDER BY id DESC LIMIT 5`)
 
   const revenueAccounts = await query<{
     id: number; account_type: string; account_name: string | null
     bank_name: string | null; account_number_masked: string | null
     is_verified: number; total_received: number
-  }>(`SELECT * FROM revenue_accounts ORDER BY id`)
+  }>(`SELECT id, account_type, account_name, bank_name, account_number_masked, is_verified, total_received FROM revenue_accounts ORDER BY id`)
 
   const agentRevenue = await query<{ agent_name: string; total: number }>(
     `SELECT agent_name, SUM(revenue_contributed) as total

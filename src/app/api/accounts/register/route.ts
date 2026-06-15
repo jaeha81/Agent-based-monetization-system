@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   const accounts = await query<Record<string, unknown>>(
-    `SELECT * FROM revenue_accounts ORDER BY id`
+    `SELECT id, account_type, account_name, bank_name, account_number_masked, account_holder, is_verified, total_received, last_settled_at, created_at FROM revenue_accounts ORDER BY id`
   )
   return NextResponse.json({ ok: true, accounts })
 }

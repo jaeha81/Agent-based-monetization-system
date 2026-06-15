@@ -94,7 +94,7 @@ export async function GET() {
       id: number; account_type: string; account_name: string | null
       bank_name: string | null; account_number_masked: string | null
       is_verified: number; total_received: number; last_settled_at: string | null
-    }>(`SELECT * FROM revenue_accounts ORDER BY id`)
+    }>(`SELECT id, account_type, account_name, bank_name, account_number_masked, is_verified, total_received, last_settled_at FROM revenue_accounts ORDER BY id`)
 
     return NextResponse.json({
       ok: true, byProduct, byPlatform, byCategory,
