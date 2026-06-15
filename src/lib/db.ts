@@ -169,6 +169,13 @@ function initSchema(db: Database.Database) {
       ('evolution_agent', 'idle');
   `)
 
+  // Migration: add created_at to content if missing (for existing DBs)
+  const cols = db.prepare(`PRAGMA table_info(content)`).all() as { name: string }[]
+  if (!cols.some(c => c.name === 'created_at')) {
+    db.exec(`ALTER TABLE content ADD COLUMN created_at TEXT`)
+    db.exec(`UPDATE content SET created_at = datetime('now') WHERE created_at IS NULL`)
+  }
+
   const accountCount = (db.prepare('SELECT COUNT(*) as c FROM accounts').get() as { c: number }).c
   if (accountCount === 0) {
     seedAccounts(db)
