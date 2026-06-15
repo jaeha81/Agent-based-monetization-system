@@ -46,7 +46,8 @@ function initSchema(db: Database.Database) {
       status TEXT DEFAULT 'draft',
       views INTEGER DEFAULT 0,
       revenue INTEGER DEFAULT 0,
-      posted_at TEXT
+      posted_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS accounts (
