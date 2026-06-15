@@ -1,14 +1,17 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ['better-sqlite3'],
-  },
-  webpack: (config, { isServer }) => {
-    if (isServer) {
-      config.externals = [...(config.externals || []), 'better-sqlite3']
-    }
-    return config
-  },
-}
+import withPWAInit from '@ducanh2912/next-pwa'
 
-export default nextConfig
+const withPWA = withPWAInit({
+  dest: 'public',
+  cacheOnFrontEndNav: true,
+  aggressiveFrontEndNavCaching: true,
+  reloadOnOnline: true,
+  disable: process.env.NODE_ENV === 'development',
+  workboxOptions: {
+    disableDevLogs: true,
+  },
+})
+
+/** @type {import('next').NextConfig} */
+const nextConfig = {}
+
+export default withPWA(nextConfig)
