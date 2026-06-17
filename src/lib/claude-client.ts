@@ -8,7 +8,7 @@ export function mockDelay(ms = 1200) {
 
 const genAI = new GoogleGenerativeAI((process.env.GEMINI_API_KEY || '').trim())
 
-const REQUEST_OPTIONS = { apiVersion: 'v1' as const }
+const REQUEST_OPTIONS = { apiVersion: 'v1beta' as const }
 
 export async function generateJSON<T>(
   systemPrompt: string,
