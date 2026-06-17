@@ -234,6 +234,7 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
     hook: string; script: string; product_id: number
     product_name: string; coupang_url: string | null
     video_url: string | null; language: string | null
+    retry_count: number
   }>(
     `SELECT sp.*, c.platform, c.hook, c.script, c.product_id, c.video_url, c.language,
             p.name as product_name, p.coupang_url
@@ -300,8 +301,26 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
       succeeded++
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      await execute(`UPDATE scheduled_posts SET status = 'failed', error = ? WHERE id = ?`, [msg, post.id])
-      failed++
+      const retryCount = post.retry_count ?? 0
+      if (retryCount < 3) {
+        const retryAt = new Date(Date.now() + (retryCount + 1) * 60 * 60 * 1000).toISOString()
+        await execute(
+          `UPDATE scheduled_posts SET status = 'pending', retry_count = ?, scheduled_for = ?, error = ? WHERE id = ?`,
+          [retryCount + 1, retryAt, msg, post.id]
+        )
+        console.warn(`[Publish] 재시도 예약 (${retryCount + 1}/3) → ${retryAt}`)
+      } else {
+        await execute(`UPDATE scheduled_posts SET status = 'failed', error = ? WHERE id = ?`, [msg, post.id])
+        const alertUrl = process.env.DISCORD_NOTIFY_WEBHOOK
+        if (alertUrl) {
+          sendDiscordWebhook(alertUrl, '', [
+            makeEmbed(`⚠️ 게시 최종 실패`, `ID: ${post.id} / ${post.platform} / ${post.product_name}`, COLORS.red, [
+              { name: '오류', value: msg.slice(0, 500) },
+            ]),
+          ]).catch(() => {})
+        }
+        failed++
+      }
       console.error(`[Publish] 실패 (${post.id}):`, err)
     }
   }
