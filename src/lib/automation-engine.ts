@@ -45,7 +45,7 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
   let productsFound = 0
   let contentGenerated = 0
   let scheduled = 0
-  let videosCreated = 0
+  const videosCreated = 0
   let blogsPosted = 0
 
   try {
