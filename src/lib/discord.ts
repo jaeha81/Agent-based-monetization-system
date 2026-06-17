@@ -25,6 +25,7 @@ export const COLORS = {
   yellow: 0xfee75c,
   red: 0xed4245,
   purple: 0x9b59b6,
+  grey: 0x95a5a6,
 } as const
 
 export function verifyDiscordSignature(
