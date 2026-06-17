@@ -22,7 +22,7 @@ export async function GET() {
   checks.youtube = { ok: !!(process.env.YOUTUBE_CLIENT_ID && process.env.YOUTUBE_REFRESH_TOKEN) }
   checks.shotstack = { ok: !!process.env.SHOTSTACK_API_KEY }
   checks.tistory = { ok: !!process.env.TISTORY_ACCESS_TOKEN }
-  checks.discord = { ok: !!process.env.DISCORD_NOTIFY_WEBHOOK }
+  checks.discord = { ok: !!process.env.SHORTS_DISCORD_WEBHOOK }
 
   const allOk = checks.db.ok && checks.gemini.ok && checks.coupang.ok
   const status = allOk ? 200 : 503

@@ -15,8 +15,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const notifyUrl = process.env.DISCORD_NOTIFY_WEBHOOK
-  if (!notifyUrl) return NextResponse.json({ ok: false, reason: 'DISCORD_NOTIFY_WEBHOOK not set' })
+  const notifyUrl = process.env.SHORTS_DISCORD_WEBHOOK
+  if (!notifyUrl) return NextResponse.json({ ok: false, reason: 'SHORTS_DISCORD_WEBHOOK not set' })
 
   const [
     revenueRow, contentRow, publishedRow,

@@ -12,13 +12,13 @@ const COMMANDS = [
 ]
 
 export async function POST() {
-  const appId = process.env.DISCORD_APPLICATION_ID
-  const botToken = process.env.DISCORD_BOT_TOKEN
-  const guildId = process.env.DISCORD_GUILD_ID
+  const appId = process.env.SHORTS_DISCORD_APPLICATION_ID
+  const botToken = process.env.SHORTS_DISCORD_BOT_TOKEN
+  const guildId = process.env.SHORTS_DISCORD_GUILD_ID
 
   if (!appId || !botToken) {
     return NextResponse.json(
-      { ok: false, error: 'DISCORD_APPLICATION_ID 또는 DISCORD_BOT_TOKEN 환경변수가 없습니다' },
+      { ok: false, error: 'SHORTS_DISCORD_APPLICATION_ID 또는 SHORTS_DISCORD_BOT_TOKEN 환경변수가 없습니다' },
       { status: 500 }
     )
   }

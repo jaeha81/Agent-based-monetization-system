@@ -16,6 +16,9 @@ interface EnvStatus {
   TISTORY_ACCESS_TOKEN: boolean
   AMAZON_ASSOCIATE_TAG_US: boolean
   AMAZON_ASSOCIATE_TAG_JP: boolean
+  SHORTS_DISCORD_WEBHOOK: boolean
+  SHORTS_DISCORD_APPLICATION_ID: boolean
+  SHORTS_DISCORD_BOT_TOKEN: boolean
 }
 
 type StepItem = { text: string; url?: string }
@@ -161,17 +164,20 @@ const STEPS: Step[] = [
   {
     id: 'discord',
     icon: Bell,
-    title: 'Discord 알림 (선택)',
+    title: 'Discord 전용채널 알림 (선택)',
     color: 'text-indigo-600',
     bgColor: 'bg-indigo-50',
     borderColor: 'border-indigo-200',
     required: false,
-    envKey: 'CRON_SECRET',
-    description: '자동화 결과를 Discord로 실시간 알림',
-    envVars: ['DISCORD_NOTIFY_WEBHOOK', 'DISCORD_PUBLIC_KEY', 'DISCORD_APPLICATION_ID'],
+    envKey: 'SHORTS_DISCORD_WEBHOOK',
+    description: '쇼츠 수익화 전용 Discord 채널 - jh-chat(Bucky 전용)과 충돌 없이 분리 운영',
+    envVars: ['SHORTS_DISCORD_WEBHOOK', 'SHORTS_DISCORD_PUBLIC_KEY', 'SHORTS_DISCORD_APPLICATION_ID', 'SHORTS_DISCORD_BOT_TOKEN', 'SHORTS_DISCORD_GUILD_ID'],
     steps: [
-      { text: 'Discord 서버에서 채널 → 웹훅 URL 복사' },
-      { text: 'Vercel에 DISCORD_NOTIFY_WEBHOOK=https://discord.com/api/webhooks/... 추가' },
+      { text: 'Discord 서버에 쇼츠 수익화 전용 채널 생성 (예: #shorts-수익화)' },
+      { text: '채널 설정 → 통합 → 웹훅 → 새 웹훅 생성 후 URL 복사' },
+      { text: 'Vercel에 SHORTS_DISCORD_WEBHOOK=https://discord.com/api/webhooks/... 추가' },
+      { text: '슬래시 커맨드: SHORTS_DISCORD_APPLICATION_ID, SHORTS_DISCORD_BOT_TOKEN, SHORTS_DISCORD_GUILD_ID 추가 (선택)' },
+      { text: '주의: 기존 jh-chat 채널의 DISCORD_NOTIFY_WEBHOOK는 절대 사용하지 마세요 (Bucky 에이전트 전용)' },
     ],
   },
 ]

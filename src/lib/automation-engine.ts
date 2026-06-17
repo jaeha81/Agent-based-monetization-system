@@ -200,7 +200,7 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
 
     const result: AutomationResult = { runId, productsFound, contentGenerated, scheduled, videosCreated, blogsPosted, errors }
 
-    const notifyUrl = process.env.DISCORD_NOTIFY_WEBHOOK
+    const notifyUrl = process.env.SHORTS_DISCORD_WEBHOOK
     if (notifyUrl) {
       sendDiscordWebhook(notifyUrl, '', [
         makeEmbed('✅ 자동화 실행 완료', `실행 ID: **${runId}**`, COLORS.green, [
@@ -311,7 +311,7 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
         console.warn(`[Publish] 재시도 예약 (${retryCount + 1}/3) → ${retryAt}`)
       } else {
         await execute(`UPDATE scheduled_posts SET status = 'failed', error = ? WHERE id = ?`, [msg, post.id])
-        const alertUrl = process.env.DISCORD_NOTIFY_WEBHOOK
+        const alertUrl = process.env.SHORTS_DISCORD_WEBHOOK
         if (alertUrl) {
           sendDiscordWebhook(alertUrl, '', [
             makeEmbed(`⚠️ 게시 최종 실패`, `ID: ${post.id} / ${post.platform} / ${post.product_name}`, COLORS.red, [
