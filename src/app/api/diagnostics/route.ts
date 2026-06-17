@@ -11,12 +11,12 @@ async function testGemini(): Promise<{ ok: boolean; model?: string; error?: stri
   try {
     const genAI = new GoogleGenerativeAI(apiKey.trim())
     const model = genAI.getGenerativeModel(
-      { model: 'gemini-2.0-flash' },
+      { model: 'gemini-2.5-flash' },
       { apiVersion: 'v1' }
     )
     const result = await model.generateContent('ping')
     const text = result.response.text()
-    return { ok: !!text, model: 'gemini-2.0-flash' }
+    return { ok: !!text, model: 'gemini-2.5-flash' }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
