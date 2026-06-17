@@ -203,6 +203,9 @@ const MIGRATIONS = [
   `INSERT OR IGNORE INTO agent_states (agent_name, status) VALUES ('click_agent', 'idle')`,
   `INSERT OR IGNORE INTO agent_states (agent_name, status) VALUES ('seo_agent', 'idle')`,
   `INSERT OR IGNORE INTO agent_states (agent_name, status) VALUES ('video_agent', 'idle')`,
+  `ALTER TABLE scheduled_posts ADD COLUMN retry_count INTEGER DEFAULT 0`,
+  `ALTER TABLE content ADD COLUMN ab_group TEXT DEFAULT 'A'`,
+  `ALTER TABLE content ADD COLUMN click_count INTEGER DEFAULT 0`,
 ]
 
 async function initSchema(client: Client): Promise<void> {

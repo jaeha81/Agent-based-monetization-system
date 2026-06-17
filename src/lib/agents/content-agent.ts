@@ -171,8 +171,8 @@ export async function runContentAgent(
     const ids: number[] = []
     for (const c of contents) {
       const { lastInsertRowid } = await execute(
-        'INSERT INTO content (product_id, platform, hook, script, image_prompt, status, target_market, language) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [productId, c.platform, c.hook, c.script, c.image_prompt, 'draft', targetMarket, language]
+        'INSERT INTO content (product_id, platform, hook, script, image_prompt, status, target_market, language, ab_group) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [productId, c.platform, c.hook, c.script, c.image_prompt, 'draft', targetMarket, language, 'A']
       )
       ids.push(lastInsertRowid)
     }
@@ -200,8 +200,8 @@ Disclosure to include: ${disclosure}`
   const savedIds: number[] = []
   for (const c of batch.contents) {
     const { lastInsertRowid } = await execute(
-      'INSERT INTO content (product_id, platform, hook, script, image_prompt, status, target_market, language) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [productId, c.platform, c.hook, c.script, c.image_prompt, 'draft', targetMarket, language]
+      'INSERT INTO content (product_id, platform, hook, script, image_prompt, status, target_market, language, ab_group) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [productId, c.platform, c.hook, c.script, c.image_prompt, 'draft', targetMarket, language, 'A']
     )
     savedIds.push(lastInsertRowid)
   }
