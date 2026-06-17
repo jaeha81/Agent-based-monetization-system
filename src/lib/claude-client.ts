@@ -16,7 +16,7 @@ export async function generateJSON<T>(
 ): Promise<T> {
   const model = genAI.getGenerativeModel(
     {
-      model: 'gemini-2.0-flash',
+              model: 'gemini-2.5-flash',
       systemInstruction: systemPrompt,
       generationConfig: { responseMimeType: 'application/json' },
     },
