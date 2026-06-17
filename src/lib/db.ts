@@ -191,8 +191,26 @@ const SCHEMA_STMTS = [
   `INSERT OR IGNORE INTO agent_states (agent_name, status) VALUES ('evolution_agent', 'idle')`,
 ]
 
+const MIGRATIONS = [
+  `ALTER TABLE content ADD COLUMN video_url TEXT`,
+  `ALTER TABLE content ADD COLUMN target_market TEXT DEFAULT 'KR'`,
+  `ALTER TABLE content ADD COLUMN language TEXT DEFAULT 'ko'`,
+  `ALTER TABLE content ADD COLUMN updated_at TEXT`,
+  `ALTER TABLE products ADD COLUMN target_market TEXT DEFAULT 'KR'`,
+  `ALTER TABLE products ADD COLUMN affiliate_program TEXT DEFAULT 'coupang'`,
+  `ALTER TABLE scheduled_posts ADD COLUMN tistory_post_id TEXT`,
+  `ALTER TABLE scheduled_posts ADD COLUMN blog_url TEXT`,
+  `INSERT OR IGNORE INTO agent_states (agent_name, status) VALUES ('click_agent', 'idle')`,
+  `INSERT OR IGNORE INTO agent_states (agent_name, status) VALUES ('seo_agent', 'idle')`,
+  `INSERT OR IGNORE INTO agent_states (agent_name, status) VALUES ('video_agent', 'idle')`,
+]
+
 async function initSchema(client: Client): Promise<void> {
   await client.batch(SCHEMA_STMTS.map(sql => ({ sql, args: [] })), 'write')
+
+  for (const sql of MIGRATIONS) {
+    try { await client.execute(sql) } catch { /* column/row already exists */ }
+  }
 
   const countRow = await client.execute('SELECT COUNT(*) as c FROM accounts')
   const count = Number((countRow.rows[0] as unknown as { c: number }).c)

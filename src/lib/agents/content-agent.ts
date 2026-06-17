@@ -1,36 +1,109 @@
 import { execute } from '@/lib/db'
 import { USE_MOCK, mockDelay, generateJSON } from '@/lib/claude-client'
+import { getAffiliateDisclosure } from '@/lib/markets'
 
-const PLATFORMS = ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'Threads', 'Naver'] as const
+const PLATFORMS_BY_MARKET: Record<string, string[]> = {
+  KR: ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'Threads', 'Naver'],
+  US: ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'Pinterest', 'Twitter'],
+  JP: ['YouTube', 'Instagram', 'TikTok', 'Twitter', 'LINE', 'Facebook'],
+  default: ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'Threads', 'Pinterest'],
+}
 
-const SYSTEM_PROMPT = `당신은 한국 쇼핑숏츠 전문 콘텐츠 크리에이터입니다.
+function buildSystemPrompt(language: string): string {
+  if (language === 'en') {
+    return `You are an expert e-commerce shorts content creator for global English-speaking audiences.
 
-핵심 원칙:
-1. 첫 3초 훅: 시청자를 즉시 멈추게 하는 강력한 훅 (의문문/충격/공감 활용)
-2. 30초 스크립트: 문제 제기 → 제품 해결 → 구매 CTA 구조
-3. 각 플랫폼 특성에 맞는 최적화 필수
+Click-Maximizing Principles:
+1. Hook (0-3s): Use psychological triggers — scarcity, curiosity gap, price anchoring, social proof
+2. Problem (3-10s): Agitate the pain point
+3. Solution (10-25s): Position product as THE answer with specific benefits
+4. CTA (25-30s): Clear urgency-driven action ("Buy NOW - limited stock")
 
-플랫폼별 스크립트 규칙:
-- YouTube: 제목형 훅 + "링크 설명란에" CTA + 좋아요/구독 유도
-- Instagram: 감성적 + 프로필 링크 언급 + 해시태그 5~10개
-- TikTok: 짧고 임팩트 + "바이오 링크" + 트렌디한 말투
-- Facebook: 친근 말투 + 댓글 링크 + 공유 유도
-- Threads: 솔직한 리뷰 톤 + 짧은 텍스트
-- Naver: 정보성 + 검색 키워드 포함
+Psychological Triggers to Use:
+- Scarcity: "Only X left in stock", "Limited time deal"
+- Social proof: "4.9★ with 10K+ reviews"
+- Curiosity gap: "I had NO idea this existed until..."
+- Price anchor: "Retails for $80 → yours for $25 today"
+- FOMO: "Everyone's buying this and here's why"
 
-중요: 6개 플랫폼의 hook은 모두 다른 문구여야 함. 같은 훅 반복 금지.
+Platform Rules:
+- YouTube: SEO title hook + "link in description" + like/subscribe
+- Instagram: Emotional + "link in bio" + 8-10 hashtags #ad
+- TikTok: Punchy + "bio link" + trending sounds reference
+- Facebook: Conversational + share prompt + comment link
+- Pinterest: Descriptive + seasonal + benefit keywords
+- Twitter: Concise + trending hashtag + affiliate link
 
-반드시 아래 JSON 형식으로만 응답하세요:
+REQUIRED: Include #ad in Instagram/Pinterest. Include "affiliate link" in YouTube description.
+All 6 hooks MUST be different. No repetition.
+
+Respond ONLY in JSON:
 {
   "contents": [
-    {
-      "platform": "YouTube",
-      "hook": "첫 3초 훅 (30자 이내)",
-      "script": "30초 전체 스크립트 (200자 내외)",
-      "image_prompt": "AI 이미지 생성용 영어 프롬프트"
-    }
+    { "platform": "YouTube", "hook": "hook under 60 chars", "script": "30s script ~200 chars", "image_prompt": "English AI image prompt" }
   ]
 }`
+  }
+
+  if (language === 'ja') {
+    return `あなたは日本市場向けのeコマースショート動画の専門コンテンツクリエイターです。
+
+クリック最大化の原則:
+1. フック（0-3秒）：希少性、好奇心ギャップ、価格アンカリング、社会的証明
+2. 問題提起（3-10秒）：悩みを強調
+3. 解決策（10-25秒）：具体的なメリットで商品をアピール
+4. CTA（25-30秒）：緊急性のある行動喚起
+
+プラットフォームルール：
+- YouTube: SEOタイトルフック + 「概要欄リンク」
+- Instagram: 感情訴求 + 「プロフリンク」 + ハッシュタグ #PR
+- TikTok: 短くインパクト + 「プロフリンク」
+- Twitter: 簡潔 + トレンドハッシュタグ
+- LINE: 親近感 + 簡潔なCTA
+- Facebook: 親しみやすいトーン + コメントリンク
+
+注意：広告であることの明示が必要（#PR #広告 #アフィリエイト）
+6つのフックは必ず異なる文句にすること。
+
+JSON形式のみで回答：
+{
+  "contents": [
+    { "platform": "YouTube", "hook": "フック60字以内", "script": "30秒スクリプト200字", "image_prompt": "English AI image prompt" }
+  ]
+}`
+  }
+
+  // Korean (default)
+  return `당신은 한국 쇼핑숏츠 전문 콘텐츠 크리에이터이자 클릭율 최적화 전문가입니다.
+
+클릭 극대화 원칙:
+1. 훅 (0-3초): 심리적 트리거 필수 사용
+   - 희소성: "재고 소진 전", "오늘만 이 가격"
+   - 호기심 갭: "이거 모르면 손해", "충격 실화"
+   - 가격 앵커링: "정가 5만원 → 지금 2만원"
+   - 사회적 증명: "리뷰 4.9점 구매자 2만명"
+2. 공감 (3-10초): 타겟 문제 자극
+3. 해결 (10-25초): 제품이 왜 최고인지 구체적 혜택 중심
+4. CTA (25-30초): 긴급성 + 명확한 행동 촉구
+
+플랫폼별 규칙:
+- YouTube: SEO 제목형 훅 + "설명란 링크" + 좋아요/구독 유도
+- Instagram: 감성 + "프로필 링크" + 해시태그 8-10개 + #광고 표시
+- TikTok: 짧고 강렬 + "바이오 링크" + 트렌디 말투
+- Facebook: 친근 + 댓글 링크 + 공유 유도
+- Threads: 솔직한 리뷰 톤 + 짧은 텍스트
+- Naver: 검색 키워드 포함 + 정보성 + 블로그 링크
+
+중요: 6개 플랫폼 훅은 반드시 모두 다른 심리 기법 사용. 같은 훅 절대 금지.
+쿠팡 파트너스 수수료 고지 문구 script에 포함 필수.
+
+반드시 JSON 형식으로만 응답:
+{
+  "contents": [
+    { "platform": "YouTube", "hook": "훅 (40자 이내)", "script": "30초 스크립트 (200자 내외)", "image_prompt": "AI 이미지 영어 프롬프트" }
+  ]
+}`
+}
 
 interface ContentItem {
   platform: string
@@ -43,29 +116,42 @@ interface ContentBatch {
   contents: ContentItem[]
 }
 
-function buildMockContents(productName: string) {
-  const hooks = [
-    `${productName} 이거 진짜야?? 댓글 폭발`,
-    `이 제품 나만 몰랐나`,
-    `30초 안에 설명하는 ${productName}`,
-    `품절 전에 빠르게 봐`,
-    `엄마가 사줬는데 진짜 미쳤다`,
-    `${productName} 솔직 후기`,
-  ]
-  const base = `${productName}인데요, 요즘 핫한 아이템이에요. 가격도 착하고 퀄리티는 최상입니다.`
-  const scripts: Record<string, string> = {
-    YouTube: `${base}\n📌 링크 설명란에서 구매하세요!\n👍 좋아요와 구독 부탁드려요`,
-    Instagram: `${base}\n👆 프로필 링크에서 구매 가능\n#쇼핑추천 #핫템 #쿠팡`,
-    TikTok: `${base}\n바이오 링크에 있어요!\n#쇼핑하울 #핫템 #쿠팡`,
-    Facebook: `${base}\n👇 댓글에 구매 링크 있어요! 공유해주세요 🙏`,
-    Threads: `${base}\n프로필 링크에서 확인하세요`,
-    Naver: `${base}\n블로그 링크에서 쿠팡 최저가 확인하세요 ✅`,
+function buildMockContents(productName: string, language: string) {
+  const hooks: Record<string, string[]> = {
+    ko: [
+      `${productName} 이거 진짜야?? 댓글 폭발`,
+      `재고 소진 전에 빨리 봐 (정가 5만원 → 지금 2만원)`,
+      `리뷰 4.9점 2만명이 산 ${productName}`,
+      `이거 모르면 진짜 손해 (충격 실화)`,
+      `오늘만 이 가격 ${productName} 실화냐`,
+      `${productName} 솔직 후기 (구매자 2만명 인증)`,
+    ],
+    en: [
+      `This ${productName} changed my life and I'm NOT joking`,
+      `$80 retailer vs $25 on Amazon (you won't believe the diff)`,
+      `POV: You just discovered the best ${productName} deal ever`,
+      `10K people bought this and HERE'S WHY`,
+      `I tested 5 ${productName}s so you don't have to`,
+      `The ${productName} everyone's talking about right now`,
+    ],
+    ja: [
+      `${productName}がヤバすぎて紹介せずにいられない`,
+      `定価5000円→今だけ2000円の${productName}`,
+      `レビュー4.9点の${productName}を正直レビュー`,
+      `これを知らないと損する${productName}の秘密`,
+      `${productName}が在庫切れ寸前！急いで`,
+      `みんなが買っている${productName}を試してみた`,
+    ],
   }
-  return PLATFORMS.map((platform, i) => ({
+
+  const selectedHooks = hooks[language] || hooks['en']
+  const platforms = PLATFORMS_BY_MARKET['KR']
+
+  return platforms.map((platform, i) => ({
     platform,
-    hook: hooks[i],
-    script: scripts[platform],
-    image_prompt: `Clean white background product photography of ${productName}, Korean e-commerce style, professional lighting`,
+    hook: selectedHooks[i] || selectedHooks[0],
+    script: `${productName} 완전 꿀템이에요! 가격 대비 퀄리티 최상. 지금 설명란 링크에서 확인하세요!`,
+    image_prompt: `Clean product photography of ${productName}, white background, professional studio lighting, Korean e-commerce style`,
   }))
 }
 
@@ -73,43 +159,55 @@ export async function runContentAgent(
   productId: number,
   productName: string,
   category: string,
-  price?: number
+  price?: number,
+  targetMarket: string = 'KR',
+  language: string = 'ko',
 ) {
+  const platforms = PLATFORMS_BY_MARKET[targetMarket] || PLATFORMS_BY_MARKET['default']
+
   if (USE_MOCK) {
     await mockDelay()
-    const contents = buildMockContents(productName)
+    const contents = buildMockContents(productName, language)
+    const ids: number[] = []
     for (const c of contents) {
-      await execute(
-        'INSERT INTO content (product_id, platform, hook, script, image_prompt, status) VALUES (?, ?, ?, ?, ?, ?)',
-        [productId, c.platform, c.hook, c.script, c.image_prompt, 'draft']
+      const { lastInsertRowid } = await execute(
+        'INSERT INTO content (product_id, platform, hook, script, image_prompt, status, target_market, language) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [productId, c.platform, c.hook, c.script, c.image_prompt, 'draft', targetMarket, language]
       )
+      ids.push(lastInsertRowid)
     }
-    return {
-      text: `## ${productName} 콘텐츠 생성 완료 (Mock)\n\n6개 플랫폼 콘텐츠 준비됐습니다.`,
-      toolCalls: ['save_content_batch (mock)'],
-    }
+    return { text: `## ${productName} 콘텐츠 생성 완료 (Mock)\n\n${platforms.length}개 플랫폼 완료`, toolCalls: ['save_content_batch (mock)'] }
   }
 
+  const disclosure = getAffiliateDisclosure(language)
   const priceStr = price ? `, 가격: ${price.toLocaleString()}원` : ''
-  const userPrompt = `제품명: "${productName}"
+  const userPrompt = language === 'ko'
+    ? `제품명: "${productName}"
 카테고리: ${category}${priceStr}
 
-위 제품으로 YouTube, Instagram, TikTok, Facebook, Threads, Naver 6개 플랫폼 쇼핑숏츠 콘텐츠를 생성해주세요.
-각 플랫폼의 hook은 반드시 다른 문구로, 각 플랫폼 특성에 맞게 작성하세요.`
+${platforms.join(', ')} 6개 플랫폼용 클릭율 극대화 쇼핑숏츠 콘텐츠를 생성하세요.
+각 훅은 반드시 서로 다른 심리 기법을 사용해야 합니다.`
+    : `Product: "${productName}"
+Category: ${category}${priceStr}
+Target market: ${targetMarket}
 
-  const batch = await generateJSON<ContentBatch>(SYSTEM_PROMPT, userPrompt)
+Create click-maximizing shopping shorts content for ${platforms.join(', ')}.
+Each hook must use a different psychological trigger.
+Disclosure to include: ${disclosure}`
+
+  const batch = await generateJSON<ContentBatch>(buildSystemPrompt(language), userPrompt)
 
   const savedIds: number[] = []
   for (const c of batch.contents) {
     const { lastInsertRowid } = await execute(
-      'INSERT INTO content (product_id, platform, hook, script, image_prompt, status) VALUES (?, ?, ?, ?, ?, ?)',
-      [productId, c.platform, c.hook, c.script, c.image_prompt, 'draft']
+      'INSERT INTO content (product_id, platform, hook, script, image_prompt, status, target_market, language) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [productId, c.platform, c.hook, c.script, c.image_prompt, 'draft', targetMarket, language]
     )
     savedIds.push(lastInsertRowid)
   }
 
   return {
     text: `## ${productName} 콘텐츠 생성 완료\n\n${batch.contents.length}개 플랫폼 콘텐츠 저장됨 (IDs: ${savedIds.join(', ')})`,
-    toolCalls: [`save_content_batch(product_id=${productId}, count=${batch.contents.length})`],
+    toolCalls: [`save_content_batch(product_id=${productId}, count=${batch.contents.length}, market=${targetMarket})`],
   }
 }
