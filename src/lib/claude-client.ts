@@ -23,7 +23,8 @@ export async function generateJSON<T>(
     REQUEST_OPTIONS
   )
   const result = await model.generateContent(userPrompt)
-  return JSON.parse(result.response.text()) as T
+  const text = result.response.text().replace(/^﻿/, '').trim()
+  return JSON.parse(text) as T
 }
 
 // Legacy interface — kept for any callers that type-check against it
