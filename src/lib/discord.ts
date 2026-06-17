@@ -1,4 +1,4 @@
-import { createVerify } from 'crypto'
+import { verify, createPublicKey } from 'crypto'
 
 export interface DiscordEmbed {
   title?: string
@@ -34,10 +34,15 @@ export function verifyDiscordSignature(
   rawBody: string
 ): boolean {
   try {
-    const verifier = createVerify('Ed25519')
-    verifier.update(timestamp + rawBody)
-    return verifier.verify(
+    const der = Buffer.concat([
+      Buffer.from('302a300506032b6570032100', 'hex'),
       Buffer.from(publicKey, 'hex'),
+    ])
+    const key = createPublicKey({ key: der, format: 'der', type: 'spki' })
+    return verify(
+      null,
+      Buffer.from(timestamp + rawBody),
+      key,
       Buffer.from(signature, 'hex')
     )
   } catch {
