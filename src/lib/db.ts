@@ -191,6 +191,24 @@ const SCHEMA_STMTS = [
   `INSERT OR IGNORE INTO agent_states (agent_name, status) VALUES ('evolution_agent', 'idle')`,
 ]
 
+const WORKFLOW_JOBS_SCHEMA = `CREATE TABLE IF NOT EXISTS workflow_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_name TEXT NOT NULL,
+  node_type TEXT NOT NULL,
+  trigger_type TEXT DEFAULT 'manual',
+  status TEXT DEFAULT 'queued',
+  input_data TEXT,
+  output_data TEXT,
+  product_id INTEGER,
+  content_id INTEGER,
+  render_id TEXT,
+  error TEXT,
+  retry_count INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  started_at TEXT,
+  completed_at TEXT
+)`
+
 const MIGRATIONS = [
   `ALTER TABLE content ADD COLUMN video_url TEXT`,
   `ALTER TABLE content ADD COLUMN target_market TEXT DEFAULT 'KR'`,
@@ -206,10 +224,12 @@ const MIGRATIONS = [
   `ALTER TABLE scheduled_posts ADD COLUMN retry_count INTEGER DEFAULT 0`,
   `ALTER TABLE content ADD COLUMN ab_group TEXT DEFAULT 'A'`,
   `ALTER TABLE content ADD COLUMN click_count INTEGER DEFAULT 0`,
+  `ALTER TABLE content ADD COLUMN render_id TEXT`,
 ]
 
 async function initSchema(client: Client): Promise<void> {
   await client.batch(SCHEMA_STMTS.map(sql => ({ sql, args: [] })), 'write')
+  try { await client.execute(WORKFLOW_JOBS_SCHEMA) } catch { /* already exists */ }
 
   for (const sql of MIGRATIONS) {
     try { await client.execute(sql) } catch { /* column/row already exists */ }
