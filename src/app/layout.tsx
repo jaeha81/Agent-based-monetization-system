@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import Sidebar from '@/components/layout/Sidebar'
 import Header from '@/components/layout/Header'
+import CookieConsent from '@/components/layout/CookieConsent'
 
 export const metadata: Metadata = {
   title: '쇼츠 수익화 대시보드',
@@ -40,6 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </main>
           </div>
         </div>
+        <CookieConsent />
       </body>
     </html>
   )

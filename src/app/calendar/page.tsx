@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 
 const PLATFORM_COLORS: Record<string, string> = {
   YouTube: 'bg-red-400',
@@ -10,180 +10,207 @@ const PLATFORM_COLORS: Record<string, string> = {
   Facebook: 'bg-blue-500',
   Threads: 'bg-gray-500',
   Naver: 'bg-green-500',
+  Pinterest: 'bg-rose-500',
+  Twitter: 'bg-sky-400',
+  LINE: 'bg-green-400',
 }
 
-function generateMockCalendarData(year: number, month: number) {
-  const events: Record<number, Array<{ platform: string; title: string; status: string }>> = {}
-  const platforms = ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'Threads', 'Naver']
-  const titles = [
-    '다이소 마카 리뷰', '나이키 신발 추천', 'MAC 블러셔 하울',
-    '닌텐도 스위치 추천', '셀럽 쇼핑 리스트', '다이어트 제품 Top5',
-  ]
-
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-  for (let i = 0; i < 40; i++) {
-    const day = Math.floor(Math.random() * daysInMonth) + 1
-    if (!events[day]) events[day] = []
-    if (events[day].length < 3) {
-      events[day].push({
-        platform: platforms[Math.floor(Math.random() * platforms.length)],
-        title: titles[Math.floor(Math.random() * titles.length)],
-        status: Math.random() > 0.4 ? 'posted' : 'scheduled',
-      })
-    }
-  }
-  return events
+const STATUS_LABELS: Record<string, string> = {
+  pending: '예정',
+  published: '게시됨',
+  failed: '실패',
 }
+
+interface CalendarEvent {
+  platform: string
+  product_name: string
+  status: string
+  time: string
+}
+
+const DAYS = ['일', '월', '화', '수', '목', '금', '토']
+const MONTHS = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월']
 
 export default function CalendarPage() {
   const now = new Date()
   const [year, setYear] = useState(now.getFullYear())
-  const [month, setMonth] = useState(now.getMonth())
+  const [month, setMonth] = useState(now.getMonth() + 1)
   const [selectedDay, setSelectedDay] = useState<number | null>(now.getDate())
+  const [events, setEvents] = useState<Record<number, CalendarEvent[]>>({})
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
 
-  const events = generateMockCalendarData(year, month)
+  const loadCalendar = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/automation/calendar?year=${year}&month=${month}`)
+      if (res.ok) {
+        const data = await res.json()
+        setEvents(data.events || {})
+        setTotal(data.total || 0)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [year, month])
 
-  const firstDow = new Date(year, month, 1).getDay()
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  useEffect(() => { loadCalendar() }, [loadCalendar])
 
   function prevMonth() {
-    if (month === 0) { setYear(y => y - 1); setMonth(11) }
+    if (month === 1) { setYear(y => y - 1); setMonth(12) }
     else setMonth(m => m - 1)
     setSelectedDay(null)
   }
 
   function nextMonth() {
-    if (month === 11) { setYear(y => y + 1); setMonth(0) }
+    if (month === 12) { setYear(y => y + 1); setMonth(1) }
     else setMonth(m => m + 1)
     setSelectedDay(null)
   }
 
-  const MONTH_KO = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월']
-  const DOW_KO = ['일', '월', '화', '수', '목', '금', '토']
+  const firstDow = new Date(year, month - 1, 1).getDay()
+  const daysInMonth = new Date(year, month, 0).getDate()
+  const todayDay = now.getFullYear() === year && now.getMonth() + 1 === month ? now.getDate() : -1
 
-  const totalScheduled = Object.values(events).flat().filter(e => e.status === 'scheduled').length
-  const totalPosted = Object.values(events).flat().filter(e => e.status === 'posted').length
+  const cells: (number | null)[] = [
+    ...Array(firstDow).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ]
+  while (cells.length % 7 !== 0) cells.push(null)
+
+  const selectedEvents = selectedDay ? (events[selectedDay] || []) : []
 
   return (
-    <div className="space-y-6 max-w-5xl">
-      <div>
-        <h2 className="text-xl font-bold">콘텐츠 캘린더</h2>
-        <p className="text-sm text-gray-500 mt-0.5">이번 달 업로드 예정 및 완료 현황</p>
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">콘텐츠 캘린더</h1>
+          <p className="text-gray-500 mt-1">{year}년 {MONTHS[month - 1]} · 예약 {total}건</p>
+        </div>
+        <button onClick={loadCalendar} disabled={loading}
+          className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-50 disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          새로고침
+        </button>
       </div>
 
-      <div className="flex gap-4">
-        <div className="bg-white rounded-xl px-4 py-3 border border-gray-200 text-center">
-          <p className="text-2xl font-bold text-green-600">{totalPosted}</p>
-          <p className="text-xs text-gray-500">완료</p>
-        </div>
-        <div className="bg-white rounded-xl px-4 py-3 border border-gray-200 text-center">
-          <p className="text-2xl font-bold text-blue-600">{totalScheduled}</p>
-          <p className="text-xs text-gray-500">예약됨</p>
-        </div>
-        <div className="bg-white rounded-xl px-4 py-3 border border-gray-200 text-center">
-          <p className="text-2xl font-bold text-gray-700">{totalPosted + totalScheduled}</p>
-          <p className="text-xs text-gray-500">이번 달 총계</p>
-        </div>
-      </div>
-
-      <div className="grid md:grid-cols-3 gap-4">
-        {/* Calendar */}
-        <div className="md:col-span-2 bg-white rounded-xl p-5 border border-gray-200">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* 캘린더 */}
+        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-4">
           <div className="flex items-center justify-between mb-4">
             <button onClick={prevMonth} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
-              <ChevronLeft size={18} />
+              <ChevronLeft className="w-5 h-5 text-gray-500" />
             </button>
-            <h3 className="font-bold text-gray-900">{year}년 {MONTH_KO[month]}</h3>
+            <h2 className="text-lg font-bold text-gray-800">{year}년 {MONTHS[month - 1]}</h2>
             <button onClick={nextMonth} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
-              <ChevronRight size={18} />
+              <ChevronRight className="w-5 h-5 text-gray-500" />
             </button>
           </div>
 
-          <div className="grid grid-cols-7 gap-1 mb-2">
-            {DOW_KO.map(d => (
-              <div key={d} className="text-center text-xs font-medium text-gray-400 py-1">{d}</div>
+          <div className="grid grid-cols-7 mb-2">
+            {DAYS.map((d, i) => (
+              <div key={d} className={`text-center text-xs font-semibold py-1 ${i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-gray-400'}`}>
+                {d}
+              </div>
             ))}
           </div>
 
           <div className="grid grid-cols-7 gap-1">
-            {Array.from({ length: firstDow }, (_, i) => (
-              <div key={`empty-${i}`} />
-            ))}
-            {Array.from({ length: daysInMonth }, (_, i) => {
-              const day = i + 1
+            {cells.map((day, i) => {
+              if (!day) return <div key={i} />
               const dayEvents = events[day] || []
-              const isToday = day === now.getDate() && month === now.getMonth() && year === now.getFullYear()
+              const isToday = day === todayDay
               const isSelected = day === selectedDay
+              const hasPublished = dayEvents.some(e => e.status === 'published')
 
               return (
                 <button
-                  key={day}
-                  onClick={() => setSelectedDay(day === selectedDay ? null : day)}
-                  className={`relative min-h-[52px] p-1.5 rounded-lg text-left border transition-all ${
-                    isSelected ? 'border-yellow-400 bg-yellow-50' :
-                    isToday ? 'border-gray-900 bg-gray-50' :
-                    'border-transparent hover:border-gray-200 hover:bg-gray-50'
-                  }`}
+                  key={i}
+                  onClick={() => setSelectedDay(day)}
+                  className={`relative aspect-square flex flex-col items-center justify-start pt-1.5 rounded-lg text-sm transition-colors
+                    ${isSelected ? 'bg-indigo-600 text-white' : isToday ? 'bg-indigo-50 border border-indigo-300' : 'hover:bg-gray-50'}
+                    ${!isSelected && i % 7 === 0 ? 'text-red-400' : !isSelected && i % 7 === 6 ? 'text-blue-400' : ''}
+                  `}
                 >
-                  <span className={`text-xs font-medium block mb-1 ${isToday ? 'text-gray-900 font-bold' : 'text-gray-600'}`}>
+                  <span className={`text-xs font-semibold leading-none ${isSelected ? 'text-white' : isToday ? 'text-indigo-700' : ''}`}>
                     {day}
                   </span>
-                  <div className="flex flex-wrap gap-0.5">
-                    {dayEvents.slice(0, 3).map((e, ei) => (
-                      <span
-                        key={ei}
-                        className={`w-1.5 h-1.5 rounded-full ${PLATFORM_COLORS[e.platform] || 'bg-gray-400'}`}
-                      />
-                    ))}
-                  </div>
+                  {dayEvents.length > 0 && (
+                    <div className="flex flex-wrap gap-0.5 mt-1 px-0.5 justify-center">
+                      {dayEvents.slice(0, 3).map((e, j) => (
+                        <div key={j} className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white opacity-80' : PLATFORM_COLORS[e.platform] || 'bg-gray-400'}`} />
+                      ))}
+                      {dayEvents.length > 3 && (
+                        <span className={`text-[8px] leading-none ${isSelected ? 'text-white' : 'text-gray-400'}`}>+{dayEvents.length - 3}</span>
+                      )}
+                    </div>
+                  )}
+                  {dayEvents.length > 0 && !isSelected && (
+                    <div className={`absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${hasPublished ? 'bg-green-400' : 'bg-amber-400'}`} />
+                  )}
                 </button>
               )
             })}
           </div>
 
-          <div className="flex gap-3 mt-4 pt-3 border-t border-gray-100 flex-wrap">
-            {Object.entries(PLATFORM_COLORS).map(([p, c]) => (
-              <div key={p} className="flex items-center gap-1.5 text-xs text-gray-500">
-                <span className={`w-2 h-2 rounded-full ${c}`} />
-                {p}
+          <div className="flex flex-wrap gap-3 mt-4 pt-3 border-t border-gray-100">
+            {Object.entries(PLATFORM_COLORS).slice(0, 6).map(([platform, color]) => (
+              <div key={platform} className="flex items-center gap-1.5 text-xs text-gray-500">
+                <div className={`w-2 h-2 rounded-full ${color}`} />
+                {platform}
               </div>
             ))}
           </div>
         </div>
 
-        {/* Day detail */}
-        <div className="bg-white rounded-xl p-5 border border-gray-200">
+        {/* 선택일 상세 */}
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
           <h3 className="font-semibold text-gray-800 mb-3">
-            {selectedDay ? `${MONTH_KO[month]} ${selectedDay}일` : '날짜를 선택하세요'}
+            {selectedDay ? `${month}월 ${selectedDay}일 예정` : '날짜를 선택하세요'}
           </h3>
 
-          {selectedDay && events[selectedDay] ? (
-            <div className="space-y-3">
-              {events[selectedDay].map((e, i) => (
-                <div key={i} className="flex items-start gap-2 p-2.5 bg-gray-50 rounded-lg">
-                  <span className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${PLATFORM_COLORS[e.platform]}`} />
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-gray-800 truncate">{e.title}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs text-gray-500">{e.platform}</span>
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                        e.status === 'posted' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
-                      }`}>
-                        {e.status === 'posted' ? '완료' : '예약됨'}
-                      </span>
+          {selectedDay && (
+            selectedEvents.length === 0 ? (
+              <div className="text-center py-10 text-gray-400">
+                <p className="text-sm">예정된 콘텐츠 없음</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {selectedEvents.map((e, i) => (
+                  <div key={i} className="flex items-start gap-2.5 p-2.5 rounded-lg bg-gray-50">
+                    <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${PLATFORM_COLORS[e.platform] || 'bg-gray-400'}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-xs font-semibold text-gray-600">{e.platform}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                          e.status === 'published' ? 'bg-green-100 text-green-700' :
+                          e.status === 'failed' ? 'bg-red-100 text-red-600' :
+                          'bg-amber-100 text-amber-700'
+                        }`}>{STATUS_LABELS[e.status] || e.status}</span>
+                      </div>
+                      <p className="text-xs text-gray-700 truncate">{e.product_name}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{e.time}</p>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : selectedDay ? (
-            <div className="text-center py-8">
-              <p className="text-sm text-gray-400">이날 콘텐츠 없음</p>
-              <button className="mt-3 text-xs text-yellow-600 hover:underline">+ 콘텐츠 예약</button>
-            </div>
-          ) : (
-            <p className="text-sm text-gray-400 text-center py-8">캘린더에서 날짜를 클릭하세요</p>
+                ))}
+              </div>
+            )
           )}
+
+          <div className="mt-4 pt-3 border-t border-gray-100 space-y-2">
+            <p className="text-xs font-semibold text-gray-500">이번 달 현황</p>
+            {[
+              { label: '전체 예약', value: total, color: 'text-gray-700' },
+              { label: '게시 완료', value: Object.values(events).flat().filter(e => e.status === 'published').length, color: 'text-green-600' },
+              { label: '게시 예정', value: Object.values(events).flat().filter(e => e.status === 'pending').length, color: 'text-amber-600' },
+              { label: '실패', value: Object.values(events).flat().filter(e => e.status === 'failed').length, color: 'text-red-500' },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="flex justify-between text-xs">
+                <span className="text-gray-500">{label}</span>
+                <span className={`font-semibold ${color}`}>{value}건</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
