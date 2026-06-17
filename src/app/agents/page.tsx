@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Play, RefreshCw, TrendingUp, FileText, Upload,
   DollarSign, Brain, Cpu, CheckCircle, XCircle,
-  Clock, Zap, Activity
+  Clock, Zap, Activity, MousePointerClick, Search, Video
 } from 'lucide-react'
 
 interface AgentState {
@@ -67,7 +67,7 @@ const AGENT_META: Record<string, { label: string; icon: React.ComponentType<{ cl
   content_agent: {
     label: '콘텐츠 에이전트', icon: FileText,
     color: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-200',
-    desc: 'Claude AI 기반 훅/스크립트/이미지 프롬프트 6플랫폼 생성',
+    desc: 'Gemini AI 기반 훅/스크립트/이미지 프롬프트 6플랫폼 다국어 생성',
   },
   publish_agent: {
     label: '게시 에이전트', icon: Upload,
@@ -83,6 +83,21 @@ const AGENT_META: Record<string, { label: string; icon: React.ComponentType<{ cl
     label: '진화 에이전트', icon: Brain,
     color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-200',
     desc: '성과 분석 → 전략 갱신 → 다음 사이클 최적화',
+  },
+  click_agent: {
+    label: '클릭 최적화 에이전트', icon: MousePointerClick,
+    color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-200',
+    desc: '심리적 트리거(희소성/긴급성/사회적 증명)로 클릭율 극대화 훅 생성',
+  },
+  seo_agent: {
+    label: 'SEO 에이전트', icon: Search,
+    color: 'text-teal-600', bg: 'bg-teal-50', border: 'border-teal-200',
+    desc: '플랫폼별 키워드·해시태그 최적화 (YouTube/Instagram/TikTok/Naver)',
+  },
+  video_agent: {
+    label: '영상 에이전트', icon: Video,
+    color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200',
+    desc: 'Shotstack API 기반 30초 쇼츠 영상 자동 생성 → YouTube 업로드',
   },
 }
 

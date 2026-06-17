@@ -1,18 +1,54 @@
 import { getRevenueSummary } from '@/lib/agents/revenue-agent'
+import { getAutomationStatus } from '@/lib/automation-engine'
+import { getActiveMarkets } from '@/lib/markets'
 import KPICards from '@/components/dashboard/KPICards'
 import { RevenueAreaChart, PlatformPieChart } from '@/components/dashboard/RevenueChart'
 import TopContent from '@/components/dashboard/TopContent'
+import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
 
 export default async function HomePage() {
-  const summary = await getRevenueSummary()
+  const [summary, autoStatus, activeMarkets] = await Promise.all([
+    getRevenueSummary(),
+    getAutomationStatus(),
+    Promise.resolve(getActiveMarkets()),
+  ])
+
+  const lastRunStatus = autoStatus.lastRun?.status
+  const MARKET_FLAGS: Record<string, string> = { KR: '🇰🇷', US: '🇺🇸', JP: '🇯🇵', GB: '🇬🇧', DE: '🇩🇪', AU: '🇦🇺' }
 
   return (
     <div className="space-y-6 max-w-7xl">
-      <div>
-        <h2 className="text-xl font-bold text-gray-900">수익화 현황</h2>
-        <p className="text-sm text-gray-500 mt-0.5">쇼핑숏츠 에이전트 자동화 시스템</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">수익화 현황</h2>
+          <p className="text-sm text-gray-500 mt-0.5">쇼핑숏츠 에이전트 자동화 시스템</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5">
+            <span className="text-xs text-gray-500">활성 마켓</span>
+            <div className="flex gap-1">
+              {activeMarkets.map(m => (
+                <span key={m} className="text-base" title={m}>{MARKET_FLAGS[m] || m}</span>
+              ))}
+            </div>
+          </div>
+          <div className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium border ${
+            lastRunStatus === 'completed' ? 'bg-green-50 text-green-700 border-green-200' :
+            lastRunStatus === 'running' ? 'bg-blue-50 text-blue-700 border-blue-200 animate-pulse' :
+            lastRunStatus === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
+            'bg-gray-50 text-gray-500 border-gray-200'
+          }`}>
+            <span className="w-1.5 h-1.5 rounded-full inline-block" style={{
+              backgroundColor: lastRunStatus === 'completed' ? '#16a34a' : lastRunStatus === 'running' ? '#2563eb' : lastRunStatus === 'failed' ? '#dc2626' : '#9ca3af'
+            }}/>
+            자동화 {lastRunStatus === 'completed' ? '완료' : lastRunStatus === 'running' ? '실행중' : lastRunStatus === 'failed' ? '실패' : '대기'}
+          </div>
+          <Link href="/automation" className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors">
+            지금 실행 →
+          </Link>
+        </div>
       </div>
 
       <KPICards
@@ -68,6 +104,33 @@ export default async function HomePage() {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* 자동화 스케줄 현황 */}
+      <div className="bg-white rounded-xl p-5 border border-gray-200">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-800">예정 게시 스케줄</h3>
+          <div className="flex gap-4 text-xs text-gray-500">
+            <span>대기: <strong className="text-indigo-600">{autoStatus.pendingPosts}개</strong></span>
+            <span>오늘 게시: <strong className="text-green-600">{autoStatus.todayPublished}개</strong></span>
+          </div>
+        </div>
+        {autoStatus.nextScheduled.length > 0 ? (
+          <div className="space-y-2">
+            {autoStatus.nextScheduled.map((s, i) => (
+              <div key={i} className="flex items-center gap-3 text-sm py-1.5 border-b border-gray-50 last:border-0">
+                <span className="text-gray-400 text-xs w-32">{new Date(s.scheduled_for).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="px-2 py-0.5 bg-gray-100 rounded text-xs font-medium text-gray-600">{s.platform}</span>
+                <span className="text-gray-700 truncate">{s.product_name}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400 text-center py-4">
+            예정된 게시물이 없습니다.{' '}
+            <Link href="/automation" className="text-indigo-500 underline">자동화를 실행</Link>하여 콘텐츠를 생성하세요.
+          </p>
+        )}
       </div>
     </div>
   )
