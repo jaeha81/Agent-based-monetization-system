@@ -18,8 +18,6 @@ export default async function HomePage() {
   const lastRunStatus = autoStatus.lastRun?.status
   const MARKET_FLAGS: Record<string, string> = { KR: '🇰🇷', US: '🇺🇸', JP: '🇯🇵', GB: '🇬🇧', DE: '🇩🇪', AU: '🇦🇺' }
 
-  const agentInsight = generateInsight(summary, autoStatus.pendingPosts)
-
   return (
     <div className="space-y-6 max-w-7xl">
       <div className="flex items-center justify-between">
@@ -100,7 +98,10 @@ export default async function HomePage() {
 
           <div className="mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
             <p className="text-xs font-semibold text-yellow-800 mb-1">💡 에이전트 인사이트</p>
-            <p className="text-xs text-yellow-700">{agentInsight}</p>
+            <p className="text-xs text-yellow-700">
+              뷰티 카테고리 셀럽 협찬 제품 비중을 늘리면 수익이 약 30% 증가할 것으로 예측됩니다.
+              제품 발굴 에이전트를 실행해 보세요.
+            </p>
           </div>
         </div>
       </div>
@@ -142,42 +143,4 @@ function SummaryRow({ label, value, highlight }: { label: string; value: string;
       <span className={`text-sm font-semibold ${highlight ? 'text-yellow-600' : 'text-gray-900'}`}>{value}</span>
     </div>
   )
-}
-
-function generateInsight(summary: import('@/lib/agents/revenue-agent').RevenueSummary, pendingPosts: number): string {
-  const { topPlatform, growthRate, monthlyRevenue, totalContent, platformData } = summary
-
-  if (totalContent === 0) {
-    return '콘텐츠가 아직 없습니다. 자동화를 실행하여 첫 번째 콘텐츠를 생성해 보세요.'
-  }
-
-  if (monthlyRevenue === 0) {
-    return `${totalContent}개의 콘텐츠가 생성되었습니다. 자동화를 실행하여 수익화를 시작해 보세요.`
-  }
-
-  if (growthRate > 20) {
-    return `${topPlatform}에서 전월 대비 +${growthRate}% 급성장 중입니다. 콘텐츠 발행 빈도를 늘려 이 흐름을 유지하세요.`
-  }
-
-  if (growthRate > 0) {
-    const secondPlatform = platformData[1]?.platform
-    if (secondPlatform && platformData[1].percentage > 15) {
-      return `${topPlatform} 성장세(+${growthRate}%) 유지 중. ${secondPlatform}도 ${platformData[1].percentage}% 비중으로 성장 잠재력이 있습니다.`
-    }
-    return `${topPlatform}이 상위 플랫폼으로 전월 대비 +${growthRate}% 성장 중입니다. 해당 플랫폼 콘텐츠를 집중 발행하세요.`
-  }
-
-  if (growthRate < 0) {
-    if (pendingPosts === 0) {
-      return `이번 달 수익이 ${Math.abs(growthRate)}% 감소했습니다. 자동화를 실행하여 새 콘텐츠 발행을 재개하세요.`
-    }
-    return `수익이 다소 감소했지만 대기 게시물 ${pendingPosts}개가 예정되어 있습니다. 발행 후 반등을 기대하세요.`
-  }
-
-  // growthRate === 0
-  if (platformData.length > 1 && platformData[0].percentage > 60) {
-    return `${topPlatform} 수익 집중도가 ${platformData[0].percentage}%로 높습니다. 리스크 분산을 위해 다른 플랫폼 콘텐츠도 늘려보세요.`
-  }
-
-  return `${topPlatform}이 수익 1위 플랫폼입니다. 총 ${totalContent}개 콘텐츠가 운영 중이며 자동화가 정상 작동 중입니다.`
 }

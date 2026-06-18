@@ -209,6 +209,7 @@ const WORKFLOW_JOBS_SCHEMA = `CREATE TABLE IF NOT EXISTS workflow_jobs (
   completed_at TEXT
 )`
 
+
 const MIGRATIONS = [
   `ALTER TABLE content ADD COLUMN video_url TEXT`,
   `ALTER TABLE content ADD COLUMN target_market TEXT DEFAULT 'KR'`,
@@ -225,6 +226,10 @@ const MIGRATIONS = [
   `ALTER TABLE content ADD COLUMN ab_group TEXT DEFAULT 'A'`,
   `ALTER TABLE content ADD COLUMN click_count INTEGER DEFAULT 0`,
   `ALTER TABLE content ADD COLUMN render_id TEXT`,
+  `ALTER TABLE content ADD COLUMN compliance_status TEXT DEFAULT 'pending'`,
+  `ALTER TABLE content ADD COLUMN ai_disclosed INTEGER DEFAULT 1`,
+  `ALTER TABLE content ADD COLUMN affiliate_disclosed INTEGER DEFAULT 1`,
+  `ALTER TABLE content ADD COLUMN risk_level TEXT DEFAULT 'low'`,
 ]
 
 async function initSchema(client: Client): Promise<void> {

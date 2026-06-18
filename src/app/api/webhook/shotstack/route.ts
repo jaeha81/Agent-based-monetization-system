@@ -1,57 +1,107 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { queryOne, execute } from '@/lib/db'
+import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags } from '@/lib/youtube'
 import { resumeVideoRenderJob } from '@/lib/workflow-engine'
 
 export const runtime = 'nodejs'
-export const maxDuration = 300
+export const maxDuration = 120
 
-// Shotstack가 렌더링 완료 시 POST로 호출
-// Body: { type, status, id (renderId), url, ... }
 export async function POST(req: NextRequest) {
-  // 시크릿 검증
   const secret = req.nextUrl.searchParams.get('secret')
-  if (secret !== process.env.CRON_SECRET) {
+  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  let body: Record<string, unknown>
+  let body: { id?: string; status?: string; url?: string; error?: string }
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const renderId = body.id as string | undefined
-  const status = body.status as string | undefined
-  const videoUrl = body.url as string | undefined
-
-  console.log(`[Webhook/Shotstack] render_id=${renderId} status=${status} url=${videoUrl}`)
+  const { id: renderId, status, url: videoUrl, error } = body
 
   if (!renderId) {
-    return NextResponse.json({ error: 'render_id missing' }, { status: 400 })
+    return NextResponse.json({ error: 'missing renderId' }, { status: 400 })
   }
 
-  if (status === 'done' && videoUrl) {
-    try {
-      await resumeVideoRenderJob(renderId, videoUrl)
-      return NextResponse.json({ ok: true, renderId, action: 'youtube_upload_queued' })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error('[Webhook/Shotstack] resumeVideoRenderJob 실패:', msg)
-      return NextResponse.json({ ok: false, error: msg }, { status: 500 })
+  console.log(`[Webhook/Shotstack] render_id=${renderId} status=${status}`)
+
+  if (status === 'failed') {
+    await execute(
+      `UPDATE scheduled_posts SET status = 'failed', error = ?
+       WHERE content_id IN (SELECT id FROM content WHERE render_id = ?)`,
+      [error || 'Shotstack render failed', renderId]
+    )
+    await execute(`UPDATE content SET render_id = NULL WHERE render_id = ?`, [renderId])
+    return NextResponse.json({ ok: true, action: 'marked_failed' })
+  }
+
+  if (status !== 'done' || !videoUrl) {
+    return NextResponse.json({ ok: true, action: 'ignored', status })
+  }
+
+  // Path 1: workflow-engine (job waiting for this render_id)
+  try {
+    await resumeVideoRenderJob(renderId, videoUrl)
+  } catch (e) {
+    console.error('[Webhook/Shotstack] resumeVideoRenderJob error:', e)
+  }
+
+  // Path 2: automation-engine (scheduled_post waiting for video via render_id)
+  const content = await queryOne<{
+    id: number; hook: string | null; script: string | null
+    product_name: string; category: string; coupang_url: string | null
+  }>(
+    `SELECT c.id, c.hook, c.script, p.name as product_name, p.category, p.coupang_url
+     FROM content c
+     JOIN products p ON c.product_id = p.id
+     WHERE c.render_id = ? AND c.platform = 'YouTube'`,
+    [renderId]
+  )
+
+  if (content) {
+    await execute('UPDATE content SET video_url = ?, render_id = NULL WHERE id = ?', [videoUrl, content.id])
+
+    if (process.env.YOUTUBE_CLIENT_ID && process.env.YOUTUBE_REFRESH_TOKEN) {
+      try {
+        const tags = buildShortsTags(content.product_name, content.category)
+        const affiliateUrl = content.coupang_url || 'https://www.coupang.com'
+        const description = buildShortsDescription(content.script || '', affiliateUrl, tags)
+        const videoBuffer = Buffer.from(await (await fetch(videoUrl)).arrayBuffer())
+
+        const ytResult = await uploadYouTubeShorts({
+          title: (content.hook || content.product_name).slice(0, 100),
+          description,
+          tags,
+          privacyStatus: 'private',
+          madeForKids: false,
+        }, videoBuffer)
+
+        await execute(
+          `UPDATE content SET status = 'posted', posted_at = datetime('now') WHERE id = ?`,
+          [content.id]
+        )
+        await execute(
+          `UPDATE scheduled_posts SET youtube_video_id = ?, status = 'published', published_at = datetime('now')
+           WHERE content_id = ? AND platform = 'YouTube'`,
+          [ytResult.videoId, content.id]
+        )
+
+        console.log(`[Webhook/Shotstack] YouTube 업로드 완료: ${ytResult.url}`)
+        return NextResponse.json({ ok: true, action: 'youtube_uploaded', videoId: ytResult.videoId, url: ytResult.url })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.error('[Webhook/Shotstack] YouTube upload error:', msg)
+        await execute(
+          `UPDATE scheduled_posts SET status = 'failed', error = ?
+           WHERE content_id = ? AND platform = 'YouTube'`,
+          [msg, content.id]
+        )
+        return NextResponse.json({ ok: false, action: 'youtube_upload_failed', error: msg }, { status: 500 })
+      }
     }
   }
 
-  if (status === 'failed') {
-    // 실패 시 workflow_jobs에 에러 기록
-    const { execute } = await import('@/lib/db')
-    await execute(
-      `UPDATE workflow_jobs SET status = 'failed', error = ?, completed_at = datetime('now')
-       WHERE render_id = ? AND status = 'waiting'`,
-      [`Shotstack 렌더 실패: ${body.error || 'unknown'}`, renderId]
-    )
-    return NextResponse.json({ ok: false, renderId, status: 'render_failed' })
-  }
-
-  // 진행 중 알림 (queued, fetching 등) — 무시
-  return NextResponse.json({ ok: true, renderId, status, action: 'ignored' })
+  return NextResponse.json({ ok: true, action: 'video_stored', videoUrl })
 }

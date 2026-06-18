@@ -7,7 +7,7 @@ import { runSeoAgent, buildOptimizedTags } from '@/lib/agents/seo-agent'
 import { buildShortsDescription } from '@/lib/youtube'
 import { sendDiscordWebhook, makeEmbed, COLORS } from '@/lib/discord'
 import { getActiveMarkets, buildAffiliateUrl, getAffiliateDisclosure, MARKETS } from '@/lib/markets'
-import { renderShortsVideo } from '@/lib/shotstack'
+import { submitShotstackRender } from '@/lib/shotstack'
 import { postTistory, buildTistoryContent } from '@/lib/tistory'
 
 export interface AutomationResult {
@@ -45,7 +45,7 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
   let productsFound = 0
   let contentGenerated = 0
   let scheduled = 0
-  const videosCreated = 0
+  let videosCreated = 0
   let blogsPosted = 0
 
   try {
@@ -234,9 +234,9 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
     hook: string; script: string; product_id: number
     product_name: string; coupang_url: string | null
     video_url: string | null; language: string | null
-    retry_count: number
+    render_id: string | null; retry_count: number
   }>(
-    `SELECT sp.*, c.platform, c.hook, c.script, c.product_id, c.video_url, c.language,
+    `SELECT sp.*, c.platform, c.hook, c.script, c.product_id, c.video_url, c.language, c.render_id,
             p.name as product_name, p.coupang_url
      FROM scheduled_posts sp
      JOIN content c ON sp.content_id = c.id
@@ -251,31 +251,17 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
 
   for (const post of pending) {
     try {
-      // YouTube: generate video via Shotstack then upload
+      // YouTube: async Shotstack render → webhook triggers upload
       if (post.platform === 'YouTube' && process.env.YOUTUBE_CLIENT_ID && process.env.YOUTUBE_REFRESH_TOKEN) {
-        let videoUrl = post.video_url
+        const videoUrl = post.video_url
 
-        if (!videoUrl && process.env.SHOTSTACK_API_KEY) {
-          console.log(`[Publish] Shotstack 영상 생성 중: ${post.product_name}`)
-          try {
-            videoUrl = await renderShortsVideo(
-              post.hook || post.product_name,
-              post.product_name,
-              post.language || 'ko'
-            )
-            await execute('UPDATE content SET video_url = ? WHERE id = ?', [videoUrl, post.content_id])
-            console.log(`[Publish] 영상 생성 완료: ${videoUrl}`)
-          } catch (vidErr) {
-            console.error('[Publish] 영상 생성 실패:', vidErr)
-          }
-        }
-
+        // Already have video URL → upload directly
         if (videoUrl) {
           const { uploadYouTubeShorts, buildShortsTags } = await import('@/lib/youtube')
           const tags = buildShortsTags(post.product_name, '')
           const videoBuffer = Buffer.from(await (await fetch(videoUrl)).arrayBuffer())
           const ytResult = await uploadYouTubeShorts(
-            { title: (post.hook || post.product_name).slice(0, 100), description: post.script || '', tags, privacyStatus: 'public' },
+            { title: (post.hook || post.product_name).slice(0, 100), description: post.script || '', tags, privacyStatus: 'private', madeForKids: false },
             videoBuffer
           )
           await execute(
@@ -287,6 +273,35 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
           succeeded++
           continue
         }
+
+        // Render already submitted → skip (webhook will handle it)
+        if (post.render_id) {
+          console.log(`[Publish] YouTube ${post.id}: Shotstack 렌더 대기 중 (${post.render_id})`)
+          continue
+        }
+
+        // Submit async Shotstack render — webhook /api/webhook/shotstack will upload
+        if (process.env.SHOTSTACK_API_KEY) {
+          const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
+          const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
+          try {
+            const renderId = await submitShotstackRender(
+              post.hook || post.product_name,
+              post.product_name,
+              post.language || 'ko',
+              callbackUrl
+            )
+            await execute('UPDATE content SET render_id = ? WHERE id = ?', [renderId, post.content_id])
+            console.log(`[Publish] Shotstack 렌더 제출 완료: ${renderId} (webhook 대기)`)
+          } catch (vidErr) {
+            console.error('[Publish] Shotstack 제출 실패:', vidErr)
+          }
+          continue  // webhook이 업로드 처리
+        }
+
+        // No Shotstack — YouTube upload requires a video file
+        console.warn(`[Publish] YouTube ${post.id} 건너뜀: SHOTSTACK_API_KEY 미설정 (영상 없음)`)
+        continue  // FIX: 이전엔 여기서 "other platforms" 블록으로 fall-through하여 published 처리됐음
       }
 
       // Other platforms — mark as published (manual or future integration)
