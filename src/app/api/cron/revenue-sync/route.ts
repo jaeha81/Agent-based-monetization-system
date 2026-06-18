@@ -14,40 +14,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // 게시된 콘텐츠 수익 누적 시뮬레이션 (실제 쿠팡 API 연동 시 교체)
-  const posted = await query<{
-    id: number; views: number; revenue: number
-    commission_rate: number; account_id: number
-  }>(
-    `SELECT c.id, c.views, c.revenue, p.commission_rate, a.id as account_id
-     FROM content c
-     JOIN products p ON c.product_id = p.id
-     JOIN accounts a ON a.platform = c.platform
-     WHERE c.status = 'posted'
-     ORDER BY RANDOM() LIMIT 20`
+  // YouTube Analytics API 미연동 상태 — 실제 조회수/수익 데이터 없음
+  // 실제 쿠팡 파트너스 수수료는 파트너스 대시보드(partners.coupang.com)에서 수동 확인 필요
+  // 이 엔드포인트는 향후 YouTube Analytics API 또는 쿠팡 파트너스 API 연동 시 활성화
+
+  const postedCount = await query<{ id: number }>(
+    `SELECT c.id FROM content c WHERE c.status = 'posted' LIMIT 1`
   )
 
-  let totalAdded = 0
-
-  for (const c of posted) {
-    const newViews = Math.floor(Math.random() * 2000)
-    const newRevenue = Math.floor(newViews * 0.003 * 25000 * (c.commission_rate / 100))
-
-    if (newRevenue > 0) {
-      await execute(
-        `UPDATE content SET views = views + ?, revenue = revenue + ? WHERE id = ?`,
-        [newViews, newRevenue, c.id]
-      )
-
-      await execute(
-        `INSERT INTO revenue_logs (account_id, content_id, amount, commission_type)
-         VALUES (?, ?, ?, 'coupang_partners')`,
-        [c.account_id, c.id, newRevenue]
-      )
-
-      totalAdded += newRevenue
-    }
-  }
-
-  return NextResponse.json({ ok: true, revenueAdded: totalAdded, postsUpdated: posted.length })
+  return NextResponse.json({
+    ok: true,
+    message: '실제 수익 데이터는 쿠팡 파트너스 대시보드(partners.coupang.com)에서 확인하세요.',
+    postedContent: postedCount.length,
+    revenueAdded: 0,
+  })
 }

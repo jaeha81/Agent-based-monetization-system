@@ -70,8 +70,8 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
               `INSERT INTO products (name, category, coupang_url, commission_rate, viral_score, estimated_revenue, target_market)
                VALUES (?, ?, ?, ?, ?, ?, ?)`,
               [cp.productName, cp.categoryName, affiliate.shortUrl, cp.commissionRate,
-               Math.floor(70 + Math.random() * 25),
-               Math.floor(cp.salePrice * cp.commissionRate * 0.003 * 500000), market]
+               0,
+               0, market]
             )
             productId = lastInsertRowid
             productsFound++
@@ -304,15 +304,12 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
         continue  // FIX: 이전엔 여기서 "other platforms" 블록으로 fall-through하여 published 처리됐음
       }
 
-      // Other platforms — mark as published (manual or future integration)
-      await execute(`UPDATE scheduled_posts SET status = 'published', published_at = datetime('now') WHERE id = ?`, [post.id])
-      await execute(`UPDATE content SET status = 'posted', posted_at = datetime('now') WHERE id = ?`, [post.content_id])
-
-      // Simulated revenue for non-YouTube platforms
-      const views = Math.floor(Math.random() * 50000)
-      const commRate = getCategoryCommissionRate('')
-      const revenue = Math.floor(views * 0.003 * 30000 * (commRate / 100))
-      await execute(`UPDATE content SET views = views + ?, revenue = revenue + ? WHERE id = ?`, [views, revenue, post.content_id])
+      // Non-YouTube platforms: no API integration yet — skip without fake data
+      await execute(
+        `UPDATE scheduled_posts SET status = 'skipped', error = 'API 미연동 (Instagram/TikTok/Facebook 직접 게시 필요)' WHERE id = ?`,
+        [post.id]
+      )
+      console.log(`[Publish] ${post.platform} ${post.id} 건너뜀: API 미연동`)
       succeeded++
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
