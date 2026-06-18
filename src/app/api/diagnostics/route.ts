@@ -12,7 +12,7 @@ async function testGemini(): Promise<{ ok: boolean; model?: string; error?: stri
     const genAI = new GoogleGenerativeAI(apiKey.trim())
     const model = genAI.getGenerativeModel(
       { model: 'gemini-2.5-flash' },
-      { apiVersion: 'v1' }
+      { apiVersion: 'v1beta' }
     )
     const result = await model.generateContent('ping')
     const text = result.response.text()

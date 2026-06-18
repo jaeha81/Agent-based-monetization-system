@@ -7,7 +7,7 @@ import { runSeoAgent, buildOptimizedTags } from '@/lib/agents/seo-agent'
 import { buildShortsDescription } from '@/lib/youtube'
 import { sendDiscordWebhook, makeEmbed, COLORS } from '@/lib/discord'
 import { getActiveMarkets, buildAffiliateUrl, getAffiliateDisclosure, MARKETS } from '@/lib/markets'
-import { renderShortsVideo } from '@/lib/shotstack'
+import { submitShotstackRender } from '@/lib/shotstack'
 import { postTistory, buildTistoryContent } from '@/lib/tistory'
 
 export interface AutomationResult {
@@ -282,7 +282,6 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
 
         // Submit async Shotstack render — webhook /api/webhook/shotstack will upload
         if (process.env.SHOTSTACK_API_KEY) {
-          const { submitShotstackRender } = await import('@/lib/shotstack')
           const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
           const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
           try {
