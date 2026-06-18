@@ -169,8 +169,8 @@ async function nodeProductDiscovery(
         `INSERT INTO products (name, category, coupang_url, commission_rate, viral_score, estimated_revenue, target_market)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [p.productName, p.categoryName, aff.shortUrl, p.commissionRate,
-         Math.floor(70 + Math.random() * 25),
-         Math.floor(p.salePrice * p.commissionRate * 0.003 * 500000),
+         0,
+         0,
          input.market || 'KR']
       )
       productIds.push(lastInsertRowid)
@@ -373,15 +373,7 @@ async function nodeSchedulePost(
   )
   await execute(`UPDATE content SET status = 'scheduled' WHERE id = ?`, [input.contentId])
 
-  // 시뮬레이션 수익
-  const views = Math.floor(Math.random() * 30000)
-  const rev = Math.floor(views * 0.002 * 25000 * 0.03)
-  await execute(
-    `UPDATE content SET views = views + ?, revenue = revenue + ? WHERE id = ?`,
-    [views, rev, input.contentId]
-  )
-
-  await completeJob(jobId, { scheduled: scheduled.toISOString(), platform: input.platform, simulatedRevenue: rev })
+  await completeJob(jobId, { scheduled: scheduled.toISOString(), platform: input.platform })
 }
 
 // 수익 동기화
@@ -394,22 +386,8 @@ async function nodeRevenueSync(
     return
   }
 
-  const content = await queryOne<{ commission_rate: number }>(
-    `SELECT p.commission_rate FROM content c JOIN products p ON c.product_id = p.id WHERE c.id = ?`,
-    [input.contentId]
-  )
-  const views = Math.floor(Math.random() * 50000)
-  const rev = Math.floor(views * 0.003 * 30000 * ((content?.commission_rate || 3) / 100))
-
-  await execute(
-    `UPDATE content SET views = views + ?, revenue = revenue + ? WHERE id = ?`,
-    [views, rev, input.contentId]
-  )
-  await execute(
-    `INSERT INTO revenue_logs (account_id, content_id, amount, commission_type) VALUES (?, ?, ?, 'coupang_partners')`,
-    [acc.id, input.contentId, rev]
-  )
-  await completeJob(jobId, { views, revenue: rev })
+  // 실제 YouTube Analytics / 쿠팡 파트너스 API 미연동 — 수익 데이터 기록 안 함
+  await completeJob(jobId, { note: '수익은 실제 API 연동 후 집계됩니다.' })
 }
 
 // Discord 알림

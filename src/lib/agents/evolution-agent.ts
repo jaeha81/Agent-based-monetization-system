@@ -131,7 +131,7 @@ function buildMockInsights(
   topProduct: string, topPlatform: string,
   topHook: string, topCategory: string, prevRev: number
 ): string {
-  const growthStr = prevRev > 0 ? `전주 대비 +${Math.floor(Math.random() * 30 + 5)}%` : '첫 번째 사이클'
+  const growthStr = prevRev > 0 ? `전주 대비 수익 발생` : '첫 번째 사이클'
   return [
     `[인사이트] ${topCategory} 카테고리가 가장 높은 수익률을 보임. ${growthStr} 성장.`,
     `[추천 키워드] "${topProduct}" 관련 제품군 확장 / 셀럽 협찬 연계 제품 우선`,

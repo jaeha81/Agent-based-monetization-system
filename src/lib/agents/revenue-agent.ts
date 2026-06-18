@@ -58,7 +58,7 @@ export async function getRevenueSummary(): Promise<RevenueSummary> {
   const dailyData = dailyRows.map(r => ({
     date: r.date,
     revenue: r.revenue,
-    views: Math.floor(r.revenue * 8 + Math.random() * 10000),
+    views: 0,
   }))
 
   const platformRows = await query<{ platform: string; revenue: number }>(`

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query, execute } from '@/lib/db'
+import { getVideoStats } from '@/lib/youtube'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -14,40 +15,43 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // 게시된 콘텐츠 수익 누적 시뮬레이션 (실제 쿠팡 API 연동 시 교체)
-  const posted = await query<{
-    id: number; views: number; revenue: number
-    commission_rate: number; account_id: number
+  if (!process.env.YOUTUBE_CLIENT_ID || !process.env.YOUTUBE_REFRESH_TOKEN) {
+    return NextResponse.json({ ok: true, message: 'YouTube 자격증명 미설정', updated: 0 })
+  }
+
+  // YouTube에 실제 업로드된 콘텐츠의 조회수 가져오기
+  const postedYoutube = await query<{
+    id: number; youtube_video_id: string | null; content_id: number
   }>(
-    `SELECT c.id, c.views, c.revenue, p.commission_rate, a.id as account_id
-     FROM content c
-     JOIN products p ON c.product_id = p.id
-     JOIN accounts a ON a.platform = c.platform
-     WHERE c.status = 'posted'
-     ORDER BY RANDOM() LIMIT 20`
+    `SELECT sp.id, sp.youtube_video_id, sp.content_id
+     FROM scheduled_posts sp
+     WHERE sp.platform = 'YouTube'
+       AND sp.status = 'published'
+       AND sp.youtube_video_id IS NOT NULL
+     ORDER BY sp.published_at DESC
+     LIMIT 20`
   )
 
-  let totalAdded = 0
-
-  for (const c of posted) {
-    const newViews = Math.floor(Math.random() * 2000)
-    const newRevenue = Math.floor(newViews * 0.003 * 25000 * (c.commission_rate / 100))
-
-    if (newRevenue > 0) {
-      await execute(
-        `UPDATE content SET views = views + ?, revenue = revenue + ? WHERE id = ?`,
-        [newViews, newRevenue, c.id]
-      )
-
-      await execute(
-        `INSERT INTO revenue_logs (account_id, content_id, amount, commission_type)
-         VALUES (?, ?, ?, 'coupang_partners')`,
-        [c.account_id, c.id, newRevenue]
-      )
-
-      totalAdded += newRevenue
+  let updated = 0
+  for (const post of postedYoutube) {
+    if (!post.youtube_video_id) continue
+    try {
+      const stats = await getVideoStats(post.youtube_video_id)
+      if (stats.viewCount > 0) {
+        await execute(
+          `UPDATE content SET views = ? WHERE id = ?`,
+          [stats.viewCount, post.content_id]
+        )
+        updated++
+      }
+    } catch (e) {
+      console.error(`[revenue-sync] 조회수 조회 실패 (${post.youtube_video_id}):`, e)
     }
   }
 
-  return NextResponse.json({ ok: true, revenueAdded: totalAdded, postsUpdated: posted.length })
+  return NextResponse.json({
+    ok: true,
+    message: `YouTube 실제 조회수 ${updated}개 업데이트 완료. 쿠팡 수수료는 partners.coupang.com에서 확인하세요.`,
+    updated,
+  })
 }
