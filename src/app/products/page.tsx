@@ -159,19 +159,15 @@ export default function ProductsPage() {
 }
 
 function ProductCard({ product }: { product: Product }) {
-  const viralColor =
-    product.viral_score >= 90 ? 'text-red-600' :
-    product.viral_score >= 80 ? 'text-orange-500' : 'text-yellow-500'
-
   return (
     <div className="bg-white rounded-xl p-4 border border-gray-200 hover:border-yellow-300 hover:shadow-sm transition-all">
       <div className="flex items-start justify-between mb-2">
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${CATEGORY_COLORS[product.category] || 'bg-gray-100 text-gray-600'}`}>
           {product.category}
         </span>
-        <div className={`flex items-center gap-1 ${viralColor}`}>
-          <Star size={12} fill="currentColor" />
-          <span className="text-xs font-bold">{product.viral_score}</span>
+        <div className="flex items-center gap-1 text-gray-400">
+          <Star size={12} />
+          <span className="text-xs font-medium">수수료 {product.commission_rate}%</span>
         </div>
       </div>
 
@@ -181,30 +177,25 @@ function ProductCard({ product }: { product: Product }) {
 
       <div className="space-y-1.5 text-xs text-gray-500">
         <div className="flex items-center justify-between">
-          <span>예상 월수익</span>
-          <span className="font-semibold text-yellow-600">
-            {product.estimated_revenue >= 10000000
-              ? `${(product.estimated_revenue / 10000000).toFixed(1)}천만원`
-              : `${(product.estimated_revenue / 10000).toFixed(0)}만원`}
-          </span>
+          <span>수수료율</span>
+          <span className="font-medium text-yellow-600">{product.commission_rate}%</span>
         </div>
         <div className="flex items-center justify-between">
-          <span>수수료율</span>
-          <span className="font-medium text-gray-700">{product.commission_rate}%</span>
+          <span>실제 수익</span>
+          <span className="font-medium text-gray-400">
+            {product.estimated_revenue > 0
+              ? (product.estimated_revenue >= 10000
+                ? `${(product.estimated_revenue / 10000).toFixed(0)}만원`
+                : `${product.estimated_revenue.toLocaleString()}원`)
+              : '집계 대기 중'}
+          </span>
         </div>
       </div>
 
       <div className="mt-3 pt-3 border-t border-gray-100">
-        <div className="flex items-center gap-1 text-xs text-gray-500">
+        <div className="flex items-center gap-1 text-xs text-gray-400">
           <TrendingUp size={11} />
-          <span>바이럴 지수</span>
-          <div className="flex-1 mx-2 bg-gray-200 rounded-full h-1.5">
-            <div
-              className="h-1.5 rounded-full bg-yellow-400"
-              style={{ width: `${product.viral_score}%` }}
-            />
-          </div>
-          <span className="font-medium">{product.viral_score}/100</span>
+          <span>YouTube 업로드 후 조회수 기반 수익 집계</span>
         </div>
       </div>
     </div>

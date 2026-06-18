@@ -211,6 +211,6 @@ function getCuratedProducts(keyword: string, limit: number): CoupangProduct[] {
 
   return sorted.slice(0, limit).map(p => ({
     ...p,
-    ratingCount: Math.floor(p.rating * 3000 + p.productId),
+    ratingCount: 0,
   }))
 }

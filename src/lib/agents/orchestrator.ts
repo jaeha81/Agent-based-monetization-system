@@ -101,8 +101,8 @@ export async function runFullCycle(): Promise<OrchestratorResult> {
           `INSERT INTO products (name, category, coupang_url, commission_rate, viral_score, estimated_revenue)
            VALUES (?, ?, ?, ?, ?, ?)`,
           [p.productName, p.categoryName, aff.shortUrl, p.commissionRate,
-            Math.floor(70 + Math.random() * 25),
-            Math.floor(p.salePrice * p.commissionRate * 0.003 * 500000)]
+            0,
+            0]
         )
         newProductIds.push(lastInsertRowid)
       }
@@ -205,39 +205,21 @@ export async function runFullCycle(): Promise<OrchestratorResult> {
     results.publish_agent = { status: 'error', summary: msg, revenueAdded: 0 }
   }
 
-  // ── 5. 수익 에이전트: 수익 집계 + 계좌 반영 ──
-  await setAgentState('revenue_agent', 'running', '수익 동기화 중')
+  // ── 5. 수익 에이전트: 실제 DB 수익 집계 (YouTube revenue-sync cron이 실제 조회수 업데이트)
+  await setAgentState('revenue_agent', 'running', '수익 현황 집계 중')
   const revTaskId = await logTask('revenue_agent', 'sync_revenue')
   try {
-    const posted = await query<{ id: number; commission_rate: number; acc_id: number }>(
-      `SELECT c.id, p.commission_rate, a.id as acc_id
-       FROM content c
-       JOIN products p ON c.product_id = p.id
-       JOIN accounts a ON a.platform = c.platform
-       WHERE c.status = 'posted' ORDER BY RANDOM() LIMIT 30`
+    const postedCount = await queryOne<{ c: number }>(
+      `SELECT COUNT(*) as c FROM content WHERE status = 'posted'`
     )
-
-    let revenueAdded = 0
-    for (const c of posted) {
-      const newViews = Math.floor(Math.random() * 3000)
-      const newRev = Math.floor(newViews * 0.003 * 25000 * (c.commission_rate / 100))
-      if (newRev > 0) {
-        await execute(`UPDATE content SET views = views + ?, revenue = revenue + ? WHERE id = ?`,
-          [newViews, newRev, c.id])
-        await execute(
-          `INSERT INTO revenue_logs (account_id, content_id, amount, commission_type) VALUES (?, ?, ?, 'coupang_partners')`,
-          [c.acc_id, c.id, newRev]
-        )
-        revenueAdded += newRev
-      }
-    }
-
-    // 계좌별 수익 업데이트
-    await execute(
-      `UPDATE revenue_accounts SET total_received = (SELECT COALESCE(SUM(amount),0) FROM revenue_logs WHERE commission_type = 'coupang_partners')`
+    const totalRevRow = await queryOne<{ t: number }>(
+      `SELECT COALESCE(SUM(amount), 0) as t FROM revenue_logs`
     )
-
-    const summary = `수익 +₩${revenueAdded.toLocaleString()} 동기화 완료`
+    const totalViews = await queryOne<{ v: number }>(
+      `SELECT COALESCE(SUM(views), 0) as v FROM content WHERE status = 'posted'`
+    )
+    const revenueAdded = 0
+    const summary = `게시 콘텐츠 ${postedCount?.c ?? 0}개 | 총 조회수 ${(totalViews?.v ?? 0).toLocaleString()} | 누적 수익 ₩${(totalRevRow?.t ?? 0).toLocaleString()} (쿠팡 수익은 /revenue 페이지에서 수동 입력)`
     await setAgentState('revenue_agent', 'completed', undefined, summary, revenueAdded)
     await completeTask(revTaskId, summary, 'completed')
     results.revenue_agent = { status: 'completed', summary, revenueAdded }
