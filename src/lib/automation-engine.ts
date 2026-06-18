@@ -9,6 +9,9 @@ import { sendDiscordWebhook, makeEmbed, COLORS } from '@/lib/discord'
 import { getActiveMarkets, buildAffiliateUrl, getAffiliateDisclosure, MARKETS } from '@/lib/markets'
 import { submitShotstackRender } from '@/lib/shotstack'
 import { postTistory, buildTistoryContent } from '@/lib/tistory'
+import { postInstagramReel } from '@/lib/instagram'
+import { postTikTokVideo } from '@/lib/tiktok'
+import { postFacebookReel } from '@/lib/facebook'
 
 export interface AutomationResult {
   runId: number
@@ -304,12 +307,65 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
         continue  // FIX: 이전엔 여기서 "other platforms" 블록으로 fall-through하여 published 처리됐음
       }
 
-      // Non-YouTube platforms: no API integration yet — skip without fake data
+      // Other platforms — real API posting
+      const videoUrl = post.video_url
+      if (!videoUrl) {
+        await execute(
+          `UPDATE scheduled_posts SET status = 'skipped', error = '영상 URL 없음 (YouTube 업로드 후 URL 필요)' WHERE id = ?`,
+          [post.id]
+        )
+        console.log(`[Publish] ${post.platform} ${post.id} 건너뜀: 영상 URL 없음`)
+        continue
+      }
+
+      const caption = [post.script || '', post.hook || ''].filter(Boolean).join('\n').slice(0, 2200)
+
+      if (post.platform === 'Instagram' && process.env.INSTAGRAM_ACCESS_TOKEN) {
+        const result = await postInstagramReel({ videoUrl, caption })
+        await execute(
+          `UPDATE scheduled_posts SET status = 'published', published_at = datetime('now'), error = NULL WHERE id = ?`,
+          [post.id]
+        )
+        await execute(`UPDATE content SET status = 'posted', posted_at = datetime('now') WHERE id = ?`, [post.content_id])
+        console.log(`[Publish] Instagram 게시 완료: ${result.url}`)
+        succeeded++
+        continue
+      }
+
+      if (post.platform === 'TikTok' && process.env.TIKTOK_ACCESS_TOKEN) {
+        await postTikTokVideo({ videoUrl, title: (post.hook || post.product_name).slice(0, 150), privacyLevel: 'SELF_ONLY' })
+        await execute(
+          `UPDATE scheduled_posts SET status = 'published', published_at = datetime('now'), error = NULL WHERE id = ?`,
+          [post.id]
+        )
+        await execute(`UPDATE content SET status = 'posted', posted_at = datetime('now') WHERE id = ?`, [post.content_id])
+        console.log(`[Publish] TikTok 게시 완료`)
+        succeeded++
+        continue
+      }
+
+      if (post.platform === 'Facebook' && process.env.FACEBOOK_PAGE_ACCESS_TOKEN) {
+        const result = await postFacebookReel({
+          videoUrl,
+          description: caption,
+          title: (post.hook || post.product_name).slice(0, 255),
+        })
+        await execute(
+          `UPDATE scheduled_posts SET status = 'published', published_at = datetime('now'), error = NULL WHERE id = ?`,
+          [post.id]
+        )
+        await execute(`UPDATE content SET status = 'posted', posted_at = datetime('now') WHERE id = ?`, [post.content_id])
+        console.log(`[Publish] Facebook 게시 완료: ${result.url}`)
+        succeeded++
+        continue
+      }
+
+      // No credential set for this platform
       await execute(
-        `UPDATE scheduled_posts SET status = 'skipped', error = 'API 미연동 (Instagram/TikTok/Facebook 직접 게시 필요)' WHERE id = ?`,
+        `UPDATE scheduled_posts SET status = 'skipped', error = '${post.platform} API 자격증명 미설정' WHERE id = ?`,
         [post.id]
       )
-      console.log(`[Publish] ${post.platform} ${post.id} 건너뜀: API 미연동`)
+      console.log(`[Publish] ${post.platform} ${post.id} 건너뜀: 자격증명 미설정`)
       succeeded++
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

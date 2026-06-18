@@ -161,6 +161,22 @@ export async function getChannelStats(): Promise<{
   }
 }
 
+export async function getVideoStats(videoId: string): Promise<{ viewCount: number; likeCount: number; commentCount: number }> {
+  const accessToken = await refreshAccessToken()
+  const res = await fetch(
+    `${YT_API}/videos?part=statistics&id=${videoId}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  )
+  if (!res.ok) return { viewCount: 0, likeCount: 0, commentCount: 0 }
+  const data = await res.json()
+  const stats = data.items?.[0]?.statistics || {}
+  return {
+    viewCount: parseInt(stats.viewCount || '0'),
+    likeCount: parseInt(stats.likeCount || '0'),
+    commentCount: parseInt(stats.commentCount || '0'),
+  }
+}
+
 export function buildShortsDescription(
   script: string,
   affiliateUrl: string,

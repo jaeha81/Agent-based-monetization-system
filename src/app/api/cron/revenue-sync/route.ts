@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query, execute } from '@/lib/db'
+import { getVideoStats } from '@/lib/youtube'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -14,18 +15,43 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // YouTube Analytics API 미연동 상태 — 실제 조회수/수익 데이터 없음
-  // 실제 쿠팡 파트너스 수수료는 파트너스 대시보드(partners.coupang.com)에서 수동 확인 필요
-  // 이 엔드포인트는 향후 YouTube Analytics API 또는 쿠팡 파트너스 API 연동 시 활성화
+  if (!process.env.YOUTUBE_CLIENT_ID || !process.env.YOUTUBE_REFRESH_TOKEN) {
+    return NextResponse.json({ ok: true, message: 'YouTube 자격증명 미설정', updated: 0 })
+  }
 
-  const postedCount = await query<{ id: number }>(
-    `SELECT c.id FROM content c WHERE c.status = 'posted' LIMIT 1`
+  // YouTube에 실제 업로드된 콘텐츠의 조회수 가져오기
+  const postedYoutube = await query<{
+    id: number; youtube_video_id: string | null; content_id: number
+  }>(
+    `SELECT sp.id, sp.youtube_video_id, sp.content_id
+     FROM scheduled_posts sp
+     WHERE sp.platform = 'YouTube'
+       AND sp.status = 'published'
+       AND sp.youtube_video_id IS NOT NULL
+     ORDER BY sp.published_at DESC
+     LIMIT 20`
   )
+
+  let updated = 0
+  for (const post of postedYoutube) {
+    if (!post.youtube_video_id) continue
+    try {
+      const stats = await getVideoStats(post.youtube_video_id)
+      if (stats.viewCount > 0) {
+        await execute(
+          `UPDATE content SET views = ? WHERE id = ?`,
+          [stats.viewCount, post.content_id]
+        )
+        updated++
+      }
+    } catch (e) {
+      console.error(`[revenue-sync] 조회수 조회 실패 (${post.youtube_video_id}):`, e)
+    }
+  }
 
   return NextResponse.json({
     ok: true,
-    message: '실제 수익 데이터는 쿠팡 파트너스 대시보드(partners.coupang.com)에서 확인하세요.',
-    postedContent: postedCount.length,
-    revenueAdded: 0,
+    message: `YouTube 실제 조회수 ${updated}개 업데이트 완료. 쿠팡 수수료는 partners.coupang.com에서 확인하세요.`,
+    updated,
   })
 }

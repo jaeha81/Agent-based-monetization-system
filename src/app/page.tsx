@@ -96,13 +96,15 @@ export default async function HomePage() {
             <SummaryRow label="총 콘텐츠" value={`${summary.totalContent}개`} highlight />
           </div>
 
-          <div className="mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-            <p className="text-xs font-semibold text-yellow-800 mb-1">💡 에이전트 인사이트</p>
-            <p className="text-xs text-yellow-700">
-              뷰티 카테고리 셀럽 협찬 제품 비중을 늘리면 수익이 약 30% 증가할 것으로 예측됩니다.
-              제품 발굴 에이전트를 실행해 보세요.
-            </p>
-          </div>
+          {summary.totalContent > 0 && summary.topPlatform && (
+            <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <p className="text-xs font-semibold text-blue-800 mb-1">📊 실제 현황</p>
+              <p className="text-xs text-blue-700">
+                상위 플랫폼: <strong>{summary.topPlatform}</strong> · 총 {summary.totalContent}개 콘텐츠 생성됨
+                {summary.totalRevenue > 0 ? ` · 누적 수익: ${summary.totalRevenue.toLocaleString()}원` : ' · 수익 집계 대기 중 (YouTube 영상 공개 후 발생)'}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
