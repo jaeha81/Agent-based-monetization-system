@@ -230,6 +230,15 @@ const MIGRATIONS = [
   `ALTER TABLE content ADD COLUMN ai_disclosed INTEGER DEFAULT 1`,
   `ALTER TABLE content ADD COLUMN affiliate_disclosed INTEGER DEFAULT 1`,
   `ALTER TABLE content ADD COLUMN risk_level TEXT DEFAULT 'low'`,
+  `CREATE TABLE IF NOT EXISTS manual_revenue_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform TEXT NOT NULL,
+    source TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    period TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`,
 ]
 
 async function initSchema(client: Client): Promise<void> {

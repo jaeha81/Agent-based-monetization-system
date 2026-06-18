@@ -1,5 +1,6 @@
 const YT_API = 'https://www.googleapis.com/youtube/v3'
 const YT_UPLOAD = 'https://www.googleapis.com/upload/youtube/v3/videos'
+const YT_ANALYTICS_API = 'https://youtubeanalytics.googleapis.com/v2'
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 
 export interface YouTubeUploadOptions {
@@ -194,6 +195,52 @@ export function buildShortsDescription(
     '',
     hashtags.map(h => `#${h}`).join(' '),
   ].join('\n')
+}
+
+export interface YouTubeAnalyticsDay {
+  date: string
+  views: number
+  estimatedMinutesWatched: number
+  estimatedRevenue: number
+}
+
+export async function getYouTubeAnalyticsRevenue(
+  startDate: string,
+  endDate: string
+): Promise<{ rows: YouTubeAnalyticsDay[]; totalRevenue: number; totalViews: number; hasMonetization: boolean }> {
+  try {
+    const accessToken = await refreshAccessToken()
+    const params = new URLSearchParams({
+      ids: 'channel==MINE',
+      startDate,
+      endDate,
+      metrics: 'views,estimatedMinutesWatched,estimatedRevenue',
+      dimensions: 'day',
+      sort: 'day',
+    })
+    const res = await fetch(`${YT_ANALYTICS_API}/reports?${params}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (res.status === 403) {
+      // Missing yt-analytics-monetary.readonly scope or channel not monetized
+      return { rows: [], totalRevenue: 0, totalViews: 0, hasMonetization: false }
+    }
+    if (!res.ok) return { rows: [], totalRevenue: 0, totalViews: 0, hasMonetization: false }
+
+    const data = await res.json()
+    const USD_TO_KRW = 1380
+    const rows: YouTubeAnalyticsDay[] = (data.rows || []).map((row: [string, number, number, number]) => ({
+      date: row[0],
+      views: row[1] || 0,
+      estimatedMinutesWatched: row[2] || 0,
+      estimatedRevenue: Math.round((row[3] || 0) * USD_TO_KRW),
+    }))
+    const totalRevenue = rows.reduce((s, r) => s + r.estimatedRevenue, 0)
+    const totalViews = rows.reduce((s, r) => s + r.views, 0)
+    return { rows, totalRevenue, totalViews, hasMonetization: true }
+  } catch {
+    return { rows: [], totalRevenue: 0, totalViews: 0, hasMonetization: false }
+  }
 }
 
 export function buildShortsTags(productName: string, category: string): string[] {
