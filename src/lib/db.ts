@@ -206,6 +206,11 @@ const MIGRATIONS = [
   `ALTER TABLE scheduled_posts ADD COLUMN retry_count INTEGER DEFAULT 0`,
   `ALTER TABLE content ADD COLUMN ab_group TEXT DEFAULT 'A'`,
   `ALTER TABLE content ADD COLUMN click_count INTEGER DEFAULT 0`,
+  `ALTER TABLE content ADD COLUMN render_id TEXT`,
+  `ALTER TABLE content ADD COLUMN compliance_status TEXT DEFAULT 'pending'`,
+  `ALTER TABLE content ADD COLUMN ai_disclosed INTEGER DEFAULT 1`,
+  `ALTER TABLE content ADD COLUMN affiliate_disclosed INTEGER DEFAULT 1`,
+  `ALTER TABLE content ADD COLUMN risk_level TEXT DEFAULT 'low'`,
 ]
 
 async function initSchema(client: Client): Promise<void> {

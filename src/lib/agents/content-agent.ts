@@ -2,6 +2,13 @@ import { execute } from '@/lib/db'
 import { USE_MOCK, mockDelay, generateJSON } from '@/lib/claude-client'
 import { getAffiliateDisclosure } from '@/lib/markets'
 
+const PROHIBITED_CATEGORIES = ['건강', '의료', '투자', '금융', '성인', '불법', 'health', 'medical', 'investment', 'adult', 'illegal']
+
+const PROHIBITED_EXPRESSIONS_KO = [
+  '직접 써봤', '써봤는데', '실제로 사용해봤', '제가 써봤', '나만 아는',
+  '효과 보장', '완치', '100% 효과', '부작용 없음', '과학적으로 증명',
+]
+
 const PLATFORMS_BY_MARKET: Record<string, string[]> = {
   KR: ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'Threads', 'Naver'],
   US: ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'Pinterest', 'Twitter'],
@@ -34,6 +41,7 @@ Platform Rules:
 - Pinterest: Descriptive + seasonal + benefit keywords
 - Twitter: Concise + trending hashtag + affiliate link
 
+[Compliance] NEVER use first-person experience claims ("I used this", "I tried it", "personally tested"). Use third-person social proof or product specs only.
 REQUIRED: Include #ad in Instagram/Pinterest. Include "affiliate link" in YouTube description.
 All 6 hooks MUST be different. No repetition.
 
@@ -62,6 +70,7 @@ Respond ONLY in JSON:
 - LINE: 親近感 + 簡潔なCTA
 - Facebook: 親しみやすいトーン + コメントリンク
 
+【コンプライアンス】実体験を装う表現禁止：「実際に使ってみた」「私が試した」等は使用不可。
 注意：広告であることの明示が必要（#PR #広告 #アフィリエイト）
 6つのフックは必ず異なる文句にすること。
 
@@ -75,6 +84,12 @@ JSON形式のみで回答：
 
   // Korean (default)
   return `당신은 한국 쇼핑숏츠 전문 콘텐츠 크리에이터이자 클릭율 최적화 전문가입니다.
+
+[컴플라이언스 필수] 절대 사용 금지 표현 (표시광고법 위반):
+- "직접 써봤다", "써봤는데", "실제로 사용해봤어요", "나만 아는 꿀팁"
+- "효과 보장", "완치", "100% 효과", "부작용 없음"
+- 실제 체험을 암시하는 모든 1인칭 표현
+위 표현이 포함되면 생성을 거부하고 대체 문구를 사용하세요.
 
 클릭 극대화 원칙:
 1. 훅 (0-3초): 심리적 트리거 필수 사용
@@ -163,6 +178,10 @@ export async function runContentAgent(
   targetMarket: string = 'KR',
   language: string = 'ko',
 ) {
+  if (PROHIBITED_CATEGORIES.some(c => category.toLowerCase().includes(c.toLowerCase()))) {
+    throw new Error(`[Compliance CNT-01] 금지 카테고리입니다: ${category}. 건강/의료/투자/금융/성인/불법 카테고리는 콘텐츠 생성이 제한됩니다.`)
+  }
+
   const platforms = PLATFORMS_BY_MARKET[targetMarket] || PLATFORMS_BY_MARKET['default']
 
   if (USE_MOCK) {
@@ -196,6 +215,14 @@ Each hook must use a different psychological trigger.
 Disclosure to include: ${disclosure}`
 
   const batch = await generateJSON<ContentBatch>(buildSystemPrompt(language), userPrompt)
+
+  for (const c of batch.contents) {
+    const combined = `${c.hook} ${c.script}`
+    const found = PROHIBITED_EXPRESSIONS_KO.find(expr => combined.includes(expr))
+    if (found) {
+      throw new Error(`[Compliance CNT-01] 금지 표현 감지됨: "${found}" — 재생성이 필요합니다.`)
+    }
+  }
 
   const savedIds: number[] = []
   for (const c of batch.contents) {

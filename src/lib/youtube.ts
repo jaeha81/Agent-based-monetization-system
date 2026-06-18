@@ -63,9 +63,10 @@ export async function uploadYouTubeShorts(
       defaultLanguage: 'ko',
     },
     status: {
-      privacyStatus: opts.privacyStatus || 'public',
+      privacyStatus: opts.privacyStatus || 'private',
       selfDeclaredMadeForKids: opts.madeForKids || false,
       containsSyntheticMedia: true,
+      paidProductPlacementDetails: { hasPaidProductPlacement: true },
     },
   }
 
@@ -162,6 +163,9 @@ export function buildShortsDescription(
   hashtags: string[]
 ): string {
   return [
+    '[광고/협찬] 이 콘텐츠는 쿠팡 파트너스 제휴 마케팅으로 수수료를 받을 수 있습니다.',
+    '[AI 생성 콘텐츠] 이 영상은 인공지능(AI)으로 제작되었습니다.',
+    '',
     script,
     '',
     '━━━━━━━━━━━━━━━━━━━━━━',
@@ -169,9 +173,6 @@ export function buildShortsDescription(
     '━━━━━━━━━━━━━━━━━━━━━━',
     '',
     hashtags.map(h => `#${h}`).join(' '),
-    '',
-    '* 이 영상은 AI(인공지능)로 생성된 콘텐츠를 포함합니다.',
-    '* 이 영상은 쿠팡 파트너스 활동의 일환으로 수수료를 제공받을 수 있습니다.',
   ].join('\n')
 }
 
