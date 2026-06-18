@@ -2,6 +2,57 @@ const BASE = 'https://api.shotstack.io'
 
 const STAGE = () => (process.env.SHOTSTACK_STAGE === 'v1' ? 'v1' : 'stage')
 
+// 비동기 제출 — render_id만 반환, 폴링 없음 (webhook으로 완료 수신)
+export async function submitShotstackRender(
+  hook: string,
+  productName: string,
+  language: string = 'ko',
+  callbackUrl?: string,
+): Promise<string> {
+  const key = process.env.SHOTSTACK_API_KEY
+  if (!key) throw new Error('SHOTSTACK_API_KEY 미설정')
+
+  const cta =
+    language === 'ja' ? '🛒 説明欄のリンクから購入'
+    : language === 'ko' ? '🛒 설명란 링크에서 구매'
+    : '🛒 Buy link in description'
+
+  const bg = BG_GRADIENTS[Math.floor(Math.abs(hook.length * 7 + productName.length * 3) % BG_GRADIENTS.length)]
+  const html = buildVideoHtml(hook.slice(0, 40), productName, cta, bg)
+
+  const body: Record<string, unknown> = {
+    timeline: {
+      tracks: [{ clips: [{ asset: { type: 'html', html, width: 1080, height: 1920 }, start: 0, length: 30, fit: 'none' }] }],
+    },
+    output: { format: 'mp4', resolution: 'hd', aspectRatio: '9:16', fps: 30 },
+  }
+
+  // Shotstack webhook callback (워크플로우 엔진이 URL 전달 시)
+  if (callbackUrl) {
+    body.callback = callbackUrl
+  }
+
+  const res = await fetch(`${BASE}/${STAGE()}/render`, {
+    method: 'POST',
+    headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`Shotstack 제출 실패: ${await res.text()}`)
+
+  const { response } = await res.json() as { response: { id: string } }
+  return response.id
+}
+
+// 단일 폴링 체크 (webhook 불가 시 수동 확인용)
+export async function pollShotstackRender(renderId: string): Promise<{ status: string; url?: string; error?: string }> {
+  const key = process.env.SHOTSTACK_API_KEY
+  if (!key) throw new Error('SHOTSTACK_API_KEY 미설정')
+
+  const res = await fetch(`${BASE}/${STAGE()}/render/${renderId}`, { headers: { 'x-api-key': key } })
+  const { response } = await res.json() as { response: { status: string; url?: string; error?: string } }
+  return { status: response.status, url: response.url, error: response.error }
+}
+
 const BG_GRADIENTS = [
   '#0f0c29,#302b63,#24243e',
   '#1a1a2e,#16213e,#0f3460',

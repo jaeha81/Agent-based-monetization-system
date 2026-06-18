@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { runFullCycle } from '@/lib/agents/orchestrator'
+import { startWorkflow } from '@/lib/workflow-engine'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -14,16 +14,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  console.log('[Cron/Daily] Bucky 오케스트레이터 사이클 시작')
+  console.log('[Cron/Daily] 워크플로우 엔진 사이클 시작')
   const started = Date.now()
 
   try {
-    const result = await runFullCycle()
+    const result = await startWorkflow('daily_pipeline', 'cron')
     const elapsed = ((Date.now() - started) / 1000).toFixed(1)
-    console.log(`[Cron/Daily] 완료 — ${elapsed}s`, {
-      revenue: result.totalRevenueAdded,
-      insights: result.evolutionInsights.slice(0, 80),
-    })
+    console.log(`[Cron/Daily] 완료 — ${elapsed}s rootJob=${result.rootJobId}`)
     return NextResponse.json({ ok: true, elapsed: `${elapsed}s`, ...result })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

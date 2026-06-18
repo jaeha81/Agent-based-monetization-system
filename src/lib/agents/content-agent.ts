@@ -91,6 +91,7 @@ JSON形式のみで回答：
 - 실제 체험을 암시하는 모든 1인칭 표현
 위 표현이 포함되면 생성을 거부하고 대체 문구를 사용하세요.
 
+
 클릭 극대화 원칙:
 1. 훅 (0-3초): 심리적 트리거 필수 사용
    - 희소성: "재고 소진 전", "오늘만 이 가격"
@@ -197,6 +198,7 @@ export async function runContentAgent(
     }
     return { text: `## ${productName} 콘텐츠 생성 완료 (Mock)\n\n${platforms.length}개 플랫폼 완료`, toolCalls: ['save_content_batch (mock)'] }
   }
+
 
   const disclosure = getAffiliateDisclosure(language)
   const priceStr = price ? `, 가격: ${price.toLocaleString()}원` : ''

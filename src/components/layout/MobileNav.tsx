@@ -100,8 +100,34 @@ export default function MobileNav() {
               })}
             </nav>
 
+            {/* Pipeline Visualization */}
+            <div className="px-3 py-3 border-t border-gray-700 shrink-0">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2.5">시스템 파이프라인</p>
+              <div>
+                {[
+                  { color: 'bg-violet-500', label: '트렌드 발굴', sub: 'Cron 02:00 KST' },
+                  { color: 'bg-blue-400', label: '콘텐츠 생성', sub: 'Gemini 2.5 Flash' },
+                  { color: 'bg-cyan-400', label: 'SEO + 클릭최적화', sub: '에이전트 체인' },
+                  { color: 'bg-yellow-400', label: '스케줄 등록', sub: '6플랫폼 멀티포스팅' },
+                  { color: 'bg-orange-400', label: '자동 발행', sub: 'Cron 2시간마다' },
+                  { color: 'bg-green-400', label: '수익 동기화', sub: 'Cron 06:00 KST' },
+                ].map((step, i, arr) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <div className="flex flex-col items-center flex-shrink-0">
+                      <div className={`w-2.5 h-2.5 rounded-full ${step.color} mt-1`} />
+                      {i < arr.length - 1 && <div className="w-px flex-1 bg-gray-600 my-0.5" style={{ minHeight: '12px' }} />}
+                    </div>
+                    <div className="pb-1.5">
+                      <p className="text-[11px] text-gray-200 leading-tight font-medium">{step.label}</p>
+                      <p className="text-[9px] text-gray-500 leading-tight mt-0.5">{step.sub}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className="px-4 py-3 border-t border-gray-700 text-xs text-gray-500 shrink-0">
-              <p>Cron 3종 · 6플랫폼 · 30계정</p>
+              <p>Cron 4종 · 6플랫폼 · 글로벌 5개국</p>
             </div>
           </aside>
         </div>

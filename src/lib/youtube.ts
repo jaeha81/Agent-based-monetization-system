@@ -19,10 +19,14 @@ export interface YouTubeVideoResult {
   status: string
 }
 
+function stripBom(s: string): string {
+  return s.replace(/^﻿/, '').trim()
+}
+
 async function refreshAccessToken(): Promise<string> {
-  const clientId = process.env.YOUTUBE_CLIENT_ID || ''
-  const clientSecret = process.env.YOUTUBE_CLIENT_SECRET || ''
-  const refreshToken = process.env.YOUTUBE_REFRESH_TOKEN || ''
+  const clientId = stripBom(process.env.YOUTUBE_CLIENT_ID || '')
+  const clientSecret = stripBom(process.env.YOUTUBE_CLIENT_SECRET || '')
+  const refreshToken = stripBom(process.env.YOUTUBE_REFRESH_TOKEN || '')
 
   if (!clientId || !clientSecret || !refreshToken) {
     throw new Error('YouTube OAuth 자격증명이 설정되지 않았습니다.')
@@ -45,7 +49,7 @@ async function refreshAccessToken(): Promise<string> {
   }
 
   const data = await res.json()
-  return data.access_token as string
+  return stripBom(String(data.access_token || ''))
 }
 
 export async function uploadYouTubeShorts(

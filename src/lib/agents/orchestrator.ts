@@ -96,7 +96,7 @@ export async function runFullCycle(): Promise<OrchestratorResult> {
     for (const p of products) {
       const exists = await queryOne<{ id: number }>('SELECT id FROM products WHERE name = ?', [p.productName])
       if (!exists) {
-        const aff = await generateAffiliateLink(p.productUrl, p.productId)
+        const aff = await generateAffiliateLink(p.productUrl, p.productId, p.commissionRate)
         const { lastInsertRowid } = await execute(
           `INSERT INTO products (name, category, coupang_url, commission_rate, viral_score, estimated_revenue)
            VALUES (?, ?, ?, ?, ?, ?)`,

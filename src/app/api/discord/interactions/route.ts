@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   const timestamp = req.headers.get('x-signature-timestamp') ?? ''
   const rawBody = await req.text()
 
-  const publicKey = process.env.DISCORD_PUBLIC_KEY ?? ''
+  const publicKey = process.env.SHORTS_DISCORD_PUBLIC_KEY ?? ''
   if (!publicKey || !verifyDiscordSignature(publicKey, signature, timestamp, rawBody)) {
     return new NextResponse('Invalid signature', { status: 401 })
   }
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
 
     if (cmd === '실행') {
       const token = interaction.token
-      const appId = process.env.DISCORD_APPLICATION_ID ?? ''
+      const appId = process.env.SHORTS_DISCORD_APPLICATION_ID ?? ''
 
       waitUntil((async () => {
         try {
