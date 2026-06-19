@@ -71,5 +71,5 @@ export function buildOptimizedTags(seoResult: SeoResult, platform: string): stri
   for (const val of Object.values(platformSeo)) {
     if (Array.isArray(val)) allTags.push(...val)
   }
-  return [...new Set([...allTags, ...seoResult.global_keywords])].slice(0, 20)
+  return Array.from(new Set([...allTags, ...seoResult.global_keywords])).slice(0, 20)
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { queryOne, execute } from '@/lib/db'
-import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags, postTopComment } from '@/lib/youtube'
+import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags } from '@/lib/youtube'
 import { resumeVideoRenderJob } from '@/lib/workflow-engine'
 
 export const runtime = 'nodejs'
@@ -87,14 +87,6 @@ export async function POST(req: NextRequest) {
            WHERE content_id = ? AND platform = 'YouTube'`,
           [ytResult.videoId, content.id]
         )
-
-        // 고정 댓글로 클릭 가능한 구매 링크 제공 (쇼츠 설명란 URL은 클릭 불가 정책)
-        const commentText = [
-          `🛒 구매링크 (클릭하세요): ${affiliateUrl}`,
-          '',
-          '이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.',
-        ].join('\n')
-        await postTopComment(ytResult.videoId, commentText)
 
         console.log(`[Webhook/Shotstack] YouTube 업로드 완료: ${ytResult.url}`)
         return NextResponse.json({ ok: true, action: 'youtube_uploaded', videoId: ytResult.videoId, url: ytResult.url })
