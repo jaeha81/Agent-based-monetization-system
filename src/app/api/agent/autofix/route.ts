@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { runBrainScan, getActiveProblems, resolveAndFix } from '@/lib/agent-brain'
-import { queryOne, execute } from '@/lib/db'
+import { queryOne, execute, query } from '@/lib/db'
+import { pollShotstackRender } from '@/lib/shotstack'
+import { resumeVideoRenderJob } from '@/lib/workflow-engine'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,6 +14,7 @@ interface AutofixResponse {
   scanned: number
   fixed: number
   remaining: number
+  renderResumed: number
   shotstackKeyValid: boolean
   log: string[]
   elapsedMs: number
@@ -97,6 +100,46 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
 
     log.push(`수리 완료: ${fixed}건 성공`)
 
+    // ── 4b. Shotstack waiting 렌더 폴링 (sandbox webhook 불가 대응) ──────────
+    let renderResumed = 0
+    if (process.env.SHOTSTACK_API_KEY) {
+      try {
+        const waitingJobs = await query<{ id: number; render_id: string }>(
+          `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL LIMIT 10`
+        )
+        if (waitingJobs.length > 0) {
+          log.push(`렌더 폴링: waiting 잡 ${waitingJobs.length}건 확인 중...`)
+          for (const job of waitingJobs) {
+            try {
+              const poll = await pollShotstackRender(job.render_id)
+              if (poll.status === 'done' && poll.url) {
+                await resumeVideoRenderJob(job.render_id, poll.url)
+                renderResumed++
+                log.push(`  ✓ render_id=${job.render_id} 완료 → youtube_upload 트리거`)
+              } else if (poll.status === 'failed') {
+                await execute(
+                  `UPDATE workflow_jobs SET status = 'failed', error = 'Shotstack render failed', updated_at = datetime('now') WHERE id = ?`,
+                  [job.id]
+                )
+                log.push(`  ✕ render_id=${job.render_id} 실패 처리`)
+              } else {
+                log.push(`  ⏳ render_id=${job.render_id} 진행 중 (${poll.status})`)
+              }
+            } catch (e) {
+              log.push(`  ✕ render_id=${job.render_id} 폴링 오류: ${e instanceof Error ? e.message.slice(0, 60) : String(e).slice(0, 60)}`)
+            }
+          }
+          log.push(`렌더 폴링 완료: ${renderResumed}건 유튜브 업로드 트리거됨`)
+        } else {
+          log.push('렌더 폴링: waiting 잡 없음')
+        }
+      } catch (e) {
+        log.push(`렌더 폴링 오류: ${e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80)}`)
+      }
+    } else {
+      log.push('렌더 폴링 건너뜀: SHOTSTACK_API_KEY 미설정')
+    }
+
     // ── 5. 수리 후 재스캔 (After) ──────────────────────────────────────────
     log.push('사후 스캔 실행 중...')
     const scanAfter = await runBrainScan()
@@ -132,6 +175,7 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
       scanned,
       fixed,
       remaining,
+      renderResumed,
       shotstackKeyValid,
       log,
       elapsedMs,
@@ -148,6 +192,7 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
         scanned: 0,
         fixed: 0,
         remaining: 0,
+        renderResumed: 0,
         shotstackKeyValid: true,
         log,
         elapsedMs,
