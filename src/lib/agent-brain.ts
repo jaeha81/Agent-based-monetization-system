@@ -144,18 +144,29 @@ async function detectProblems(): Promise<BrainProblem[]> {
       }
     }
 
-    // 2. Shotstack 렌더 실패 (48h)
-    const renderFails = await queryOne<{ count: number }>(
-      `SELECT COUNT(*) as count FROM workflow_jobs
+    // 2. Shotstack 렌더 실패 (48h) — 실제 에러 메시지 포함
+    const renderFailData = await queryOne<{ count: number; last_error: string | null }>(
+      `SELECT COUNT(*) as count, MAX(error) as last_error FROM workflow_jobs
        WHERE node_type='video_render' AND status='failed'
        AND created_at > datetime('now','-48 hours')`
     )
-    if (renderFails && renderFails.count > 0) {
+    if (renderFailData && renderFailData.count > 0) {
+      const errSnippet = renderFailData.last_error
+        ? `마지막 오류: ${renderFailData.last_error.slice(0, 120)}`
+        : '오류 메시지 없음 (DB 확인 필요)'
+      const isAuthError = renderFailData.last_error?.includes('401') || renderFailData.last_error?.includes('403') || renderFailData.last_error?.includes('invalid') || renderFailData.last_error?.includes('unauthorized')
+      const isTtsError = renderFailData.last_error?.toLowerCase().includes('tts') || renderFailData.last_error?.toLowerCase().includes('voice')
+      const recommendation = isAuthError
+        ? 'SHOTSTACK_API_KEY가 유효하지 않습니다. Vercel 환경변수에서 키를 재확인하세요.'
+        : isTtsError
+          ? 'TTS(음성합성) 오류입니다. Shotstack sandbox에서 TTS가 지원되지 않을 수 있습니다. stage→v1(production) 전환 확인.'
+          : 'SHOTSTACK_API_KEY 유효성 확인. SHOTSTACK_STAGE=v1 설정 여부 확인.'
       problems.push({
-        type: 'render_failure', severity: renderFails.count > 3 ? 'critical' : 'warning',
-        title: `Shotstack 렌더 실패 ${renderFails.count}건 (48h)`,
-        description: '영상 렌더링에 반복적으로 실패하고 있습니다. 업로드 콘텐츠가 없어집니다.',
-        recommendation: 'SHOTSTACK_API_KEY 유효성 확인. sandbox→production 전환 후 워터마크 없는 영상 확인.',
+        type: 'render_failure',
+        severity: renderFailData.count > 3 ? 'critical' : 'warning',
+        title: `Shotstack 렌더 실패 ${renderFailData.count}건 (48h)`,
+        description: `영상 렌더링에 반복적으로 실패하고 있습니다. ${errSnippet}`,
+        recommendation,
         resolved: false, detected_at: now,
       })
     }

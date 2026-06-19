@@ -58,13 +58,16 @@ async function testGemini(): Promise<{ ok: boolean; model?: string; error?: stri
 }
 
 export async function GET() {
-  const [runs, postsByStatus, productCount, contentByStatus, gemini, shotstack] = await Promise.all([
+  const [runs, postsByStatus, productCount, contentByStatus, gemini, shotstack, failedRenders] = await Promise.all([
     query('SELECT id, run_type, status, products_found, content_generated, posts_published, error, started_at, finished_at FROM automation_runs ORDER BY id DESC LIMIT 5'),
     query('SELECT status, COUNT(*) as c FROM scheduled_posts GROUP BY status'),
     query('SELECT COUNT(*) as c FROM products'),
     query('SELECT status, COUNT(*) as c FROM content GROUP BY status'),
     testGemini(),
     testShotstack(),
+    query<{ id: number; error: string | null; created_at: string }>(
+      `SELECT id, error, created_at FROM workflow_jobs WHERE node_type='video_render' AND status='failed' ORDER BY created_at DESC LIMIT 5`
+    ),
   ])
   return NextResponse.json({
     automation_runs: runs,
@@ -75,5 +78,6 @@ export async function GET() {
     mock_mode: process.env.USE_MOCK_DATA,
     gemini,
     shotstack,
+    failed_renders: failedRenders,
   })
 }
