@@ -243,6 +243,41 @@ export async function getYouTubeAnalyticsRevenue(
   }
 }
 
+export interface VideoDetail {
+  views: number
+  likes: number
+  privacy: 'public' | 'private' | 'unlisted' | 'unknown'
+  thumbnail: string
+  publishedAt: string | null
+}
+
+export async function getVideosStats(videoIds: string[]): Promise<Record<string, VideoDetail>> {
+  if (videoIds.length === 0) return {}
+  try {
+    const accessToken = await refreshAccessToken()
+    const idsParam = videoIds.slice(0, 50).join(',')
+    const res = await fetch(
+      `${YT_API}/videos?part=snippet,statistics,status&id=${encodeURIComponent(idsParam)}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    )
+    if (!res.ok) return {}
+    const data = await res.json()
+    const result: Record<string, VideoDetail> = {}
+    for (const item of data.items ?? []) {
+      result[item.id] = {
+        views: parseInt(item.statistics?.viewCount ?? '0'),
+        likes: parseInt(item.statistics?.likeCount ?? '0'),
+        privacy: item.status?.privacyStatus ?? 'unknown',
+        thumbnail: item.snippet?.thumbnails?.high?.url ?? item.snippet?.thumbnails?.default?.url ?? '',
+        publishedAt: item.snippet?.publishedAt ?? null,
+      }
+    }
+    return result
+  } catch {
+    return {}
+  }
+}
+
 export function buildShortsTags(productName: string, category: string): string[] {
   const base = ['쇼핑추천', '핫템', '쿠팡', productName.slice(0, 20)]
   const catTags: Record<string, string[]> = {

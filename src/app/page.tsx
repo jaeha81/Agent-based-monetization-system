@@ -4,6 +4,7 @@ import { getActiveMarkets } from '@/lib/markets'
 import KPICards from '@/components/dashboard/KPICards'
 import { RevenueAreaChart, PlatformPieChart } from '@/components/dashboard/RevenueChart'
 import TopContent from '@/components/dashboard/TopContent'
+import YouTubeUploads from '@/components/dashboard/YouTubeUploads'
 import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
@@ -106,6 +107,25 @@ export default async function HomePage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* YouTube 업로드 현황 */}
+      <div className="bg-white rounded-xl p-5 border border-gray-200">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-semibold text-gray-800">YouTube 업로드 현황</h3>
+            <p className="text-xs text-gray-400 mt-0.5">자동 업로드된 Shorts 영상 목록 · 비공개 영상은 Studio에서 공개 전환 필요</p>
+          </div>
+          <a
+            href="https://studio.youtube.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs px-3 py-1.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
+          >
+            YouTube Studio ↗
+          </a>
+        </div>
+        <YouTubeUploads />
       </div>
 
       {/* 자동화 스케줄 현황 */}
