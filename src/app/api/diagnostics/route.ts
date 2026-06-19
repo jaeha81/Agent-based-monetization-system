@@ -6,7 +6,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 async function testShotstack(): Promise<{ ok: boolean; stage?: string; error?: string; renders?: number }> {
-  const key = process.env.SHOTSTACK_API_KEY
+  const key = process.env.SHOTSTACK_API_KEY?.replace(/^﻿/, '').trim()
   if (!key) return { ok: false, error: 'SHOTSTACK_API_KEY 없음' }
   const stage = process.env.SHOTSTACK_STAGE === 'v1' ? 'v1' : 'stage'
   try {

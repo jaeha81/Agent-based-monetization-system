@@ -2,6 +2,9 @@ const BASE = 'https://api.shotstack.io'
 
 const STAGE = () => (process.env.SHOTSTACK_STAGE === 'v1' ? 'v1' : 'stage')
 
+// BOM(﻿) 및 공백 제거 — Vercel 환경변수 복붙 시 오염 방지
+const getShotstackKey = () => process.env.SHOTSTACK_API_KEY?.replace(/^﻿/, '').trim()
+
 // 비동기 제출 — render_id만 반환, 폴링 없음 (webhook으로 완료 수신)
 export async function submitShotstackRender(
   hook: string,
@@ -9,7 +12,7 @@ export async function submitShotstackRender(
   language: string = 'ko',
   callbackUrl?: string,
 ): Promise<string> {
-  const key = process.env.SHOTSTACK_API_KEY
+  const key = getShotstackKey()
   if (!key) throw new Error('SHOTSTACK_API_KEY 미설정')
 
   const cta =
@@ -45,7 +48,7 @@ export async function submitShotstackRender(
 
 // 단일 폴링 체크 (webhook 불가 시 수동 확인용)
 export async function pollShotstackRender(renderId: string): Promise<{ status: string; url?: string; error?: string }> {
-  const key = process.env.SHOTSTACK_API_KEY
+  const key = getShotstackKey()
   if (!key) throw new Error('SHOTSTACK_API_KEY 미설정')
 
   const res = await fetch(`${BASE}/${STAGE()}/render/${renderId}`, { headers: { 'x-api-key': key } })
@@ -88,7 +91,7 @@ export async function renderShortsVideo(
   productName: string,
   language: string = 'ko',
 ): Promise<string> {
-  const key = process.env.SHOTSTACK_API_KEY
+  const key = getShotstackKey()
   if (!key) throw new Error('SHOTSTACK_API_KEY 미설정')
 
   const cta =
