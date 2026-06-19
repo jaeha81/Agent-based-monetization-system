@@ -264,7 +264,7 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
           const tags = buildShortsTags(post.product_name, '')
           const videoBuffer = Buffer.from(await (await fetch(videoUrl)).arrayBuffer())
           const ytResult = await uploadYouTubeShorts(
-            { title: (post.hook || post.product_name).slice(0, 100), description: post.script || '', tags, privacyStatus: 'private', madeForKids: false },
+            { title: (post.hook || post.product_name).slice(0, 100), description: post.script || '', tags, privacyStatus: 'public', madeForKids: false },
             videoBuffer
           )
           await execute(

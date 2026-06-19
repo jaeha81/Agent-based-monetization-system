@@ -335,7 +335,7 @@ async function nodeYouTubeUpload(
     title: (content.hook || content.product_name).slice(0, 100),
     description,
     tags,
-    privacyStatus: 'private',
+    privacyStatus: 'public',
     madeForKids: false,
   }, videoBuffer)
 

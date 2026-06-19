@@ -210,6 +210,17 @@ const WORKFLOW_JOBS_SCHEMA = `CREATE TABLE IF NOT EXISTS workflow_jobs (
 )`
 
 
+const BRAIN_PROBLEMS_SCHEMA = `CREATE TABLE IF NOT EXISTS brain_problems (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  recommendation TEXT,
+  resolved INTEGER DEFAULT 0,
+  detected_at TEXT DEFAULT (datetime('now'))
+)`
+
 const MIGRATIONS = [
   `ALTER TABLE content ADD COLUMN video_url TEXT`,
   `ALTER TABLE content ADD COLUMN target_market TEXT DEFAULT 'KR'`,
@@ -244,6 +255,7 @@ const MIGRATIONS = [
 async function initSchema(client: Client): Promise<void> {
   await client.batch(SCHEMA_STMTS.map(sql => ({ sql, args: [] })), 'write')
   try { await client.execute(WORKFLOW_JOBS_SCHEMA) } catch { /* already exists */ }
+  try { await client.execute(BRAIN_PROBLEMS_SCHEMA) } catch { /* already exists */ }
 
   for (const sql of MIGRATIONS) {
     try { await client.execute(sql) } catch { /* column/row already exists */ }
