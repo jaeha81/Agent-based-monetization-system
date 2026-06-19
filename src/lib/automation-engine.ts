@@ -110,7 +110,7 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
         if (!product) continue
 
         const existingContent = await queryOne<{ c: number }>(
-          `SELECT COUNT(*) as c FROM content WHERE product_id = ? AND target_market = ? AND created_at > datetime('now', '-1 days')`,
+          `SELECT COUNT(*) as c FROM content WHERE product_id = ? AND target_market = ? AND created_at > datetime('now', '-14 days')`,
           [productId, market]
         )
         if ((existingContent?.c ?? 0) > 0) {
@@ -264,7 +264,7 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
           const tags = buildShortsTags(post.product_name, '')
           const videoBuffer = Buffer.from(await (await fetch(videoUrl)).arrayBuffer())
           const ytResult = await uploadYouTubeShorts(
-            { title: (post.hook || post.product_name).slice(0, 100), description: post.script || '', tags, privacyStatus: 'private', madeForKids: false },
+            { title: (post.hook || post.product_name).slice(0, 100), description: post.script || '', tags, privacyStatus: 'public', madeForKids: false },
             videoBuffer
           )
           await execute(

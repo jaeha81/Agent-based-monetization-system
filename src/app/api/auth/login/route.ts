@@ -22,7 +22,6 @@ export async function POST(req: NextRequest) {
   res.cookies.set('pwd_ok', '1', {
     httpOnly: true,
     sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 30,
     path: '/',
   })
 

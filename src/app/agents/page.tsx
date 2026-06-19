@@ -6,8 +6,10 @@ import { Badge } from '@/components/ui/badge'
 import {
   Play, RefreshCw, TrendingUp, FileText, Upload,
   DollarSign, Brain, Cpu, CheckCircle, XCircle,
-  Clock, Zap, Activity, MousePointerClick, Search, Video
+  Clock, Zap, Activity, MousePointerClick, Search, Video,
+  AlertTriangle, ShieldCheck, Globe, Scan, CircleCheck, CircleX, CircleDot
 } from 'lucide-react'
+import type { BrainStatus, BrainProblem, ComplianceItem } from '@/lib/agent-brain'
 
 interface AgentState {
   agent_name: string
@@ -183,15 +185,69 @@ function AgentCard({ agent }: { agent: AgentState }) {
   )
 }
 
+function SeverityBadge({ s }: { s: string }) {
+  if (s === 'critical') return <Badge className="bg-red-100 text-red-700 border-0 text-xs">위험</Badge>
+  if (s === 'warning') return <Badge className="bg-amber-100 text-amber-700 border-0 text-xs">경고</Badge>
+  return <Badge className="bg-blue-100 text-blue-700 border-0 text-xs">정보</Badge>
+}
+
+function ComplianceRow({ item }: { item: ComplianceItem }) {
+  const icon = item.status === 'pass'
+    ? <CircleCheck className="w-4 h-4 text-green-500 flex-shrink-0" />
+    : item.status === 'fail'
+    ? <CircleX className="w-4 h-4 text-red-500 flex-shrink-0" />
+    : item.status === 'warning'
+    ? <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+    : <CircleDot className="w-4 h-4 text-gray-400 flex-shrink-0" />
+  return (
+    <div className="flex items-start gap-2.5 py-2 border-b last:border-0">
+      {icon}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-gray-800">{item.rule}</span>
+          <span className="text-xs text-gray-400">{item.regulation}</span>
+          <Badge variant="outline" className="text-xs py-0">{item.region}</Badge>
+        </div>
+        <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{item.detail}</p>
+      </div>
+    </div>
+  )
+}
+
 export default function AgentsPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [running, setRunning] = useState(false)
   const [cycleResult, setCycleResult] = useState<CycleResult | null>(null)
+  const [brain, setBrain] = useState<BrainStatus | null>(null)
+  const [brainScanning, setBrainScanning] = useState(false)
 
   const load = useCallback(async () => {
     const res = await fetch('/api/agents/status')
     if (res.ok) setData(await res.json())
   }, [])
+
+  const loadBrain = useCallback(async () => {
+    const res = await fetch('/api/agent/brain')
+    if (res.ok) {
+      const d = await res.json()
+      setBrain(prev => prev ? { ...prev, problems: d.problems } : null)
+    }
+  }, [])
+
+  const runBrainScan = async () => {
+    setBrainScanning(true)
+    try {
+      const res = await fetch('/api/agent/brain', { method: 'POST' })
+      if (res.ok) setBrain(await res.json())
+    } finally {
+      setBrainScanning(false)
+    }
+  }
+
+  const resolveProblem = async (id: number) => {
+    await fetch(`/api/agent/brain?id=${id}`, { method: 'PATCH' })
+    await loadBrain()
+  }
 
   useEffect(() => {
     // localStorage에서 이전 사이클 결과 복원
@@ -200,9 +256,10 @@ export default function AgentsPage() {
       if (saved) setCycleResult(JSON.parse(saved))
     } catch {}
     load()
-    const t = setInterval(load, 8000)
+    loadBrain()
+    const t = setInterval(() => { load(); loadBrain() }, 8000)
     return () => clearInterval(t)
-  }, [load])
+  }, [load, loadBrain])
 
   async function runCycle() {
     setRunning(true)
@@ -328,6 +385,184 @@ export default function AgentsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── 쇼츠 에이전트 두뇌 패널 ───────────────────────────────────────── */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+
+        {/* 헬스 + 스캔 */}
+        <Card className="border-2 border-violet-200 bg-gradient-to-b from-violet-50 to-white">
+          <CardContent className="pt-5 pb-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Brain className="w-5 h-5 text-violet-600" />
+                <span className="font-bold text-violet-900">에이전트 두뇌</span>
+              </div>
+              <button
+                onClick={runBrainScan}
+                disabled={brainScanning}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50"
+              >
+                {brainScanning
+                  ? <><RefreshCw className="w-3 h-3 animate-spin" />스캔 중...</>
+                  : <><Scan className="w-3 h-3" />두뇌 스캔</>}
+              </button>
+            </div>
+
+            {brain ? (
+              <>
+                <div className="flex items-center gap-4 mb-4">
+                  {/* 헬스 스코어 원형 */}
+                  <div className="relative w-16 h-16 flex-shrink-0">
+                    <svg viewBox="0 0 36 36" className="w-16 h-16 -rotate-90">
+                      <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e5e7eb" strokeWidth="3"/>
+                      <circle cx="18" cy="18" r="15.9" fill="none"
+                        stroke={brain.healthScore >= 70 ? '#22c55e' : brain.healthScore >= 40 ? '#f59e0b' : '#ef4444'}
+                        strokeWidth="3"
+                        strokeDasharray={`${brain.healthScore} 100`}
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-gray-800">
+                      {brain.healthScore}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-0.5">시스템 건강도</p>
+                    <p className={`text-sm font-bold ${brain.healthScore >= 70 ? 'text-green-600' : brain.healthScore >= 40 ? 'text-amber-600' : 'text-red-600'}`}>
+                      {brain.healthScore >= 70 ? '정상' : brain.healthScore >= 40 ? '주의 필요' : '즉각 조치'}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">규제 준수 {brain.complianceScore}%</p>
+                    <p className="text-xs text-gray-400">문제 {brain.problems.length}건</p>
+                  </div>
+                </div>
+                {brain.lastScanAt && (
+                  <p className="text-xs text-gray-400">마지막 스캔: {new Date(brain.lastScanAt).toLocaleString('ko-KR', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })}</p>
+                )}
+              </>
+            ) : (
+              <div className="text-center py-6">
+                <Brain className="w-8 h-8 mx-auto mb-2 text-violet-200" />
+                <p className="text-xs text-gray-400">"두뇌 스캔" 버튼으로 시스템 진단</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 문제 목록 */}
+        <Card className="border border-red-100">
+          <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-500" />
+              감지된 문제
+              {brain && brain.problems.length > 0 && (
+                <Badge className="bg-red-100 text-red-700 border-0 text-xs ml-auto">
+                  {brain.problems.filter((p: BrainProblem) => p.severity === 'critical').length}건 위험
+                </Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pb-4">
+            {brain && brain.problems.length > 0 ? (
+              <div className="space-y-2 max-h-52 overflow-y-auto">
+                {brain.problems.map((p: BrainProblem, i: number) => (
+                  <div key={p.id ?? i} className={`rounded-lg p-2.5 border text-xs ${
+                    p.severity === 'critical' ? 'bg-red-50 border-red-200' :
+                    p.severity === 'warning' ? 'bg-amber-50 border-amber-200' :
+                    'bg-blue-50 border-blue-200'
+                  }`}>
+                    <div className="flex items-start gap-1.5 mb-1">
+                      <SeverityBadge s={p.severity} />
+                      <span className="font-semibold text-gray-800 flex-1">{p.title}</span>
+                      {p.id && (
+                        <button onClick={() => resolveProblem(p.id!)}
+                          className="text-gray-400 hover:text-green-600 flex-shrink-0 text-xs underline">해결</button>
+                      )}
+                    </div>
+                    <p className="text-gray-600 leading-relaxed mb-1">{p.description}</p>
+                    <p className="text-gray-500 italic">→ {p.recommendation}</p>
+                  </div>
+                ))}
+              </div>
+            ) : brain ? (
+              <div className="flex items-center gap-2 py-4 text-green-600">
+                <CheckCircle className="w-5 h-5" />
+                <span className="text-sm font-medium">문제 없음 — 모든 시스템 정상</span>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 py-4 text-center">스캔 후 표시됩니다</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 글로벌 전략 */}
+        <Card className="border border-emerald-100">
+          <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Globe className="w-4 h-4 text-emerald-600" />
+              글로벌 수익화 전략
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pb-4">
+            {brain?.strategy ? (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">주요 시장</p>
+                  <p className="text-xs font-medium text-emerald-700">{brain.strategy.primaryMarket}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1.5">카테고리별 수수료 현황</p>
+                  <div className="space-y-1">
+                    {brain.strategy.topCategories.slice(0, 4).map((c, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <div className="flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                          <div className="h-full rounded-full bg-emerald-400"
+                            style={{ width: `${Math.min(100, (c.commissionRate / 7) * 100)}%` }} />
+                        </div>
+                        <span className="text-xs text-gray-700 w-16 flex-shrink-0">{c.category}</span>
+                        <span className="text-xs font-bold text-emerald-600 w-8 text-right">{c.commissionRate}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1.5">다음 액션</p>
+                  <ul className="space-y-1">
+                    {brain.strategy.nextActions.slice(0, 3).map((a, i) => (
+                      <li key={i} className="text-xs text-gray-600 flex items-start gap-1.5">
+                        <span className="text-emerald-500 flex-shrink-0">▸</span>{a}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 py-4 text-center">스캔 후 표시됩니다</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 법적 규제 준수 현황 */}
+      {brain?.compliance && (
+        <Card>
+          <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-sky-600" />
+              법적 규제 준수 현황
+              <span className="ml-auto text-xs text-gray-400">
+                준수 {brain.compliance.filter((c: ComplianceItem) => c.status === 'pass').length}/{brain.compliance.length}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pb-3">
+            <div className="divide-y divide-gray-50">
+              {brain.compliance.map((item: ComplianceItem, i: number) => (
+                <ComplianceRow key={i} item={item} />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 에이전트 카드 그리드 */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

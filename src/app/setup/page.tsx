@@ -19,9 +19,17 @@ interface EnvStatus {
   SHORTS_DISCORD_WEBHOOK: boolean
   SHORTS_DISCORD_APPLICATION_ID: boolean
   SHORTS_DISCORD_BOT_TOKEN: boolean
+  INSTAGRAM_ACCESS_TOKEN: boolean
+  INSTAGRAM_USER_ID: boolean
+  TIKTOK_ACCESS_TOKEN: boolean
+  TIKTOK_OPEN_ID: boolean
+  FACEBOOK_PAGE_ACCESS_TOKEN: boolean
+  FACEBOOK_PAGE_ID: boolean
 }
 
 type StepItem = { text: string; url?: string }
+type RevenueImpact = 'high' | 'medium' | 'low'
+type ApprovalType = 'instant' | 'review'
 
 interface Step {
   id: string
@@ -35,6 +43,18 @@ interface Step {
   description: string
   steps: StepItem[]
   envVars?: string[]
+  revenueImpact?: RevenueImpact
+  approval?: ApprovalType
+}
+
+const IMPACT_BADGE: Record<RevenueImpact, { label: string; cls: string }> = {
+  high:   { label: '수익 임팩트 높음', cls: 'bg-green-100 text-green-700 border-green-200' },
+  medium: { label: '수익 임팩트 중간', cls: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
+  low:    { label: '수익 임팩트 낮음', cls: 'bg-gray-100 text-gray-500 border-gray-200' },
+}
+const APPROVAL_BADGE: Record<ApprovalType, { label: string; cls: string }> = {
+  instant: { label: '즉시 발급', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
+  review:  { label: '심사 필요', cls: 'bg-orange-100 text-orange-700 border-orange-200' },
 }
 
 const STEPS: Step[] = [
@@ -48,6 +68,8 @@ const STEPS: Step[] = [
     required: true,
     envKey: 'GEMINI_API_KEY',
     description: 'Gemini 2.5 Flash - 다국어 쇼핑 숏츠 콘텐츠 자동 생성',
+    revenueImpact: 'high',
+    approval: 'instant',
     envVars: ['GEMINI_API_KEY'],
     steps: [
       { text: 'Google AI Studio 접속', url: 'https://aistudio.google.com/apikey' },
@@ -58,17 +80,19 @@ const STEPS: Step[] = [
   {
     id: 'coupang',
     icon: ShoppingCart,
-    title: '쿠팡 파트너스 (한국 어필리에이트)',
+    title: '쿠팡 파트너스 API (한국 어필리에이트)',
     color: 'text-red-600',
     bgColor: 'bg-red-50',
     borderColor: 'border-red-200',
     required: true,
     envKey: 'COUPANG_ACCESS_KEY',
-    description: '트렌딩 제품 발굴 + 어필리에이트 링크 자동 생성 (수수료 2~8%)',
+    description: '실시간 트렌딩 상품 자동 발굴 + 어필리에이트 링크 생성 (수수료 3~7%) — 현재 큐레이션 풀 20개 고정 사용 중, API 연동 시 매일 새 상품 자동 교체',
+    revenueImpact: 'high',
+    approval: 'instant',
     envVars: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY'],
     steps: [
-      { text: '쿠팡 파트너스 가입', url: 'https://partners.coupang.com' },
-      { text: '마이페이지 → API 연동 → 액세스 키 / 시크릿 키 발급' },
+      { text: '쿠팡 파트너스 로그인', url: 'https://partners.coupang.com' },
+      { text: '마이페이지 → API 연동 → 액세스 키 / 시크릿 키 발급 (계정 있으면 즉시 발급)' },
       { text: 'Vercel에 COUPANG_ACCESS_KEY, COUPANG_SECRET_KEY 추가' },
     ],
   },
@@ -82,6 +106,8 @@ const STEPS: Step[] = [
     required: true,
     envKey: 'CRON_SECRET',
     description: '자동화 스케줄러 보안 토큰 (Vercel Cron 인증)',
+    revenueImpact: 'high',
+    approval: 'instant',
     envVars: ['CRON_SECRET'],
     steps: [
       { text: '터미널에서 랜덤 키 생성: openssl rand -base64 32' },
@@ -99,6 +125,8 @@ const STEPS: Step[] = [
     required: false,
     envKey: 'YOUTUBE_REFRESH_TOKEN',
     description: 'YouTube Data API v3 - Shorts 영상 자동 업로드 (선택)',
+    revenueImpact: 'high',
+    approval: 'instant',
     envVars: ['YOUTUBE_CLIENT_ID', 'YOUTUBE_CLIENT_SECRET', 'YOUTUBE_REFRESH_TOKEN', 'YOUTUBE_CHANNEL_ID'],
     steps: [
       { text: 'Google Cloud Console → 프로젝트 생성', url: 'https://console.cloud.google.com' },
@@ -117,12 +145,77 @@ const STEPS: Step[] = [
     borderColor: 'border-orange-200',
     required: false,
     envKey: 'SHOTSTACK_API_KEY',
-    description: '텍스트 기반 30초 쇼츠 영상 자동 생성 후 YouTube 업로드',
+    description: '텍스트 기반 30초 쇼츠 영상 자동 생성 — 현재 sandbox(워터마크) 사용 중, production 전환 시 워터마크 제거',
+    revenueImpact: 'high',
+    approval: 'instant',
     envVars: ['SHOTSTACK_API_KEY', 'SHOTSTACK_STAGE'],
     steps: [
-      { text: 'Shotstack 가입 (무료 워터마크 플랜 또는 유료)', url: 'https://shotstack.io' },
-      { text: 'Dashboard → API Keys에서 키 복사' },
-      { text: 'Vercel에 SHOTSTACK_API_KEY 추가 (SHOTSTACK_STAGE=production 선택)' },
+      { text: 'Shotstack 대시보드 접속', url: 'https://shotstack.io' },
+      { text: 'Dashboard → API Keys에서 Production 키 복사' },
+      { text: 'Vercel에 SHOTSTACK_API_KEY 교체 + SHOTSTACK_STAGE=production 추가 (현재: sandbox)' },
+    ],
+  },
+  {
+    id: 'instagram',
+    icon: Video,
+    title: 'Instagram (Reels 자동 업로드)',
+    color: 'text-pink-600',
+    bgColor: 'bg-pink-50',
+    borderColor: 'border-pink-200',
+    required: false,
+    envKey: 'INSTAGRAM_ACCESS_TOKEN',
+    description: 'Meta Graph API - Instagram Reels 자동 업로드로 추가 노출 확보',
+    revenueImpact: 'medium',
+    approval: 'review',
+    envVars: ['INSTAGRAM_ACCESS_TOKEN', 'INSTAGRAM_USER_ID'],
+    steps: [
+      { text: 'Meta for Developers → 앱 생성', url: 'https://developers.facebook.com' },
+      { text: 'Instagram Graph API 권한 추가 (instagram_basic, instagram_content_publish)' },
+      { text: '앱 심사 제출 (영업일 기준 수일~수주 소요)' },
+      { text: '심사 완료 후 Long-lived Access Token 발급' },
+      { text: 'Vercel에 INSTAGRAM_ACCESS_TOKEN, INSTAGRAM_USER_ID 추가' },
+    ],
+  },
+  {
+    id: 'tiktok',
+    icon: Video,
+    title: 'TikTok (자동 업로드)',
+    color: 'text-slate-700',
+    bgColor: 'bg-slate-50',
+    borderColor: 'border-slate-200',
+    required: false,
+    envKey: 'TIKTOK_ACCESS_TOKEN',
+    description: 'TikTok Content Posting API - 바이럴 가능성 높은 플랫폼 추가',
+    revenueImpact: 'medium',
+    approval: 'review',
+    envVars: ['TIKTOK_ACCESS_TOKEN', 'TIKTOK_OPEN_ID'],
+    steps: [
+      { text: 'TikTok for Developers → 앱 생성', url: 'https://developers.tiktok.com' },
+      { text: 'Content Posting API 권한 신청' },
+      { text: '앱 심사 제출 (수주 소요, 비즈니스 계정 필요)' },
+      { text: '심사 완료 후 OAuth 인증 → Access Token + Open ID 발급' },
+      { text: 'Vercel에 TIKTOK_ACCESS_TOKEN, TIKTOK_OPEN_ID 추가' },
+    ],
+  },
+  {
+    id: 'facebook',
+    icon: Video,
+    title: 'Facebook (Reels 자동 업로드)',
+    color: 'text-blue-700',
+    bgColor: 'bg-blue-50',
+    borderColor: 'border-blue-200',
+    required: false,
+    envKey: 'FACEBOOK_PAGE_ACCESS_TOKEN',
+    description: 'Facebook Graph API - Facebook 페이지 Reels 업로드',
+    revenueImpact: 'medium',
+    approval: 'review',
+    envVars: ['FACEBOOK_PAGE_ACCESS_TOKEN', 'FACEBOOK_PAGE_ID'],
+    steps: [
+      { text: 'Facebook 비즈니스 페이지 개설 (없으면 생성)' },
+      { text: 'Meta for Developers → 앱에서 pages_manage_posts 권한 신청', url: 'https://developers.facebook.com' },
+      { text: 'Graph API Explorer에서 Page Access Token 발급', url: 'https://developers.facebook.com/tools/explorer' },
+      { text: 'Long-lived Page Access Token으로 교환 (60일→영구)' },
+      { text: 'Vercel에 FACEBOOK_PAGE_ACCESS_TOKEN, FACEBOOK_PAGE_ID 추가' },
     ],
   },
   {
@@ -135,6 +228,8 @@ const STEPS: Step[] = [
     required: false,
     envKey: 'TISTORY_ACCESS_TOKEN',
     description: '한국 마켓 - Tistory 블로그 어필리에이트 포스팅 자동화',
+    revenueImpact: 'low',
+    approval: 'instant',
     envVars: ['TISTORY_ACCESS_TOKEN', 'TISTORY_BLOG_NAME'],
     steps: [
       { text: 'Tistory 블로그 개설 후 개발자 앱 등록', url: 'https://www.tistory.com/guide/api/manage/register' },
@@ -152,7 +247,9 @@ const STEPS: Step[] = [
     borderColor: 'border-yellow-200',
     required: false,
     envKey: 'AMAZON_ASSOCIATE_TAG_US',
-    description: '미국/일본/영국/독일/호주 Amazon Associates 어필리에이트 (선택)',
+    description: '미국/일본/영국/독일/호주 Amazon Associates 어필리에이트 — 한국 마켓 안정화 후 확장 권장',
+    revenueImpact: 'low',
+    approval: 'instant',
     envVars: ['TARGET_MARKETS', 'AMAZON_ASSOCIATE_TAG_US', 'AMAZON_ASSOCIATE_TAG_JP', 'AMAZON_ASSOCIATE_TAG_GB', 'AMAZON_ASSOCIATE_TAG_DE', 'AMAZON_ASSOCIATE_TAG_AU'],
     steps: [
       { text: 'Amazon Associates 각 국가별 가입 (미국/일본 등)', url: 'https://affiliate-program.amazon.com' },
@@ -164,20 +261,21 @@ const STEPS: Step[] = [
   {
     id: 'discord',
     icon: Bell,
-    title: 'Discord 전용채널 알림 (선택)',
+    title: 'Discord 전용채널 알림',
     color: 'text-indigo-600',
     bgColor: 'bg-indigo-50',
     borderColor: 'border-indigo-200',
     required: false,
     envKey: 'SHORTS_DISCORD_WEBHOOK',
-    description: '쇼츠 수익화 전용 Discord 채널 - jh-chat(Bucky 전용)과 충돌 없이 분리 운영',
-    envVars: ['SHORTS_DISCORD_WEBHOOK', 'SHORTS_DISCORD_PUBLIC_KEY', 'SHORTS_DISCORD_APPLICATION_ID', 'SHORTS_DISCORD_BOT_TOKEN', 'SHORTS_DISCORD_GUILD_ID'],
+    description: '쇼츠 수익화 전용 Discord 채널 알림 — 웹훅만 설정해도 기본 알림 동작',
+    revenueImpact: 'low',
+    approval: 'instant',
+    envVars: ['SHORTS_DISCORD_WEBHOOK', 'SHORTS_DISCORD_APPLICATION_ID', 'SHORTS_DISCORD_BOT_TOKEN'],
     steps: [
       { text: 'Discord 서버에 쇼츠 수익화 전용 채널 생성 (예: #shorts-수익화)' },
       { text: '채널 설정 → 통합 → 웹훅 → 새 웹훅 생성 후 URL 복사' },
       { text: 'Vercel에 SHORTS_DISCORD_WEBHOOK=https://discord.com/api/webhooks/... 추가' },
-      { text: '슬래시 커맨드: SHORTS_DISCORD_APPLICATION_ID, SHORTS_DISCORD_BOT_TOKEN, SHORTS_DISCORD_GUILD_ID 추가 (선택)' },
-      { text: '주의: 기존 jh-chat 채널의 DISCORD_NOTIFY_WEBHOOK는 절대 사용하지 마세요 (Bucky 에이전트 전용)' },
+      { text: '슬래시 커맨드용: SHORTS_DISCORD_APPLICATION_ID, SHORTS_DISCORD_BOT_TOKEN 추가 (선택)' },
     ],
   },
 ]
@@ -261,13 +359,13 @@ export default function SetupPage() {
                 <span className="text-sm font-bold text-indigo-700">{readyCount}/{totalCount}</span>
               </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                 {Object.entries(checkResult).map(([key, set]) => (
-                  <div key={key} className="flex items-center gap-2 text-xs">
+                  <div key={key} className="flex items-center gap-2 text-xs min-w-0">
                     {set
                       ? <CheckCircle className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
                       : <Circle className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />}
-                    <span className={set ? 'text-green-800 font-medium' : 'text-gray-500'}>
+                    <span className={`truncate ${set ? 'text-green-800 font-medium' : 'text-gray-500'}`}>
                       {key}
                     </span>
                   </div>
@@ -314,12 +412,26 @@ export default function SetupPage() {
                     <Icon className={`w-5 h-5 ${step.color}`} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-base">{step.title}</span>
                       {step.required
                         ? <Badge variant="outline" className="text-xs border-red-200 text-red-600">필수</Badge>
                         : <Badge variant="outline" className="text-xs border-gray-200 text-gray-500">선택</Badge>}
-                      {isSet && <Badge className="text-xs bg-green-100 text-green-700 border-0">✓ 설정됨</Badge>}
+                      {isSet
+                        ? <Badge className="text-xs bg-green-100 text-green-700 border-0">✓ 설정됨</Badge>
+                        : <>
+                            {step.revenueImpact && (
+                              <Badge className={`text-xs border ${IMPACT_BADGE[step.revenueImpact].cls}`}>
+                                {IMPACT_BADGE[step.revenueImpact].label}
+                              </Badge>
+                            )}
+                            {step.approval && (
+                              <Badge className={`text-xs border ${APPROVAL_BADGE[step.approval].cls}`}>
+                                {APPROVAL_BADGE[step.approval].label}
+                              </Badge>
+                            )}
+                          </>
+                      }
                     </div>
                     <p className="text-sm font-normal text-gray-500 mt-0.5">{step.description}</p>
                   </div>

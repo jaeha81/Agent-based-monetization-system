@@ -5,6 +5,26 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+async function testShotstack(): Promise<{ ok: boolean; stage?: string; error?: string; renders?: number }> {
+  const key = process.env.SHOTSTACK_API_KEY?.replace(/^﻿/, '').trim()
+  if (!key) return { ok: false, error: 'SHOTSTACK_API_KEY 없음' }
+  const stage = process.env.SHOTSTACK_STAGE === 'v1' ? 'v1' : 'stage'
+  try {
+    // 존재하지 않는 render ID로 GET — 인증 성공 시 404, 키 오류 시 401
+    const res = await fetch(`https://api.shotstack.io/${stage}/render/health-check-probe`, {
+      headers: { 'x-api-key': key },
+    })
+    if (res.status === 401 || res.status === 403) {
+      const body = await res.text()
+      return { ok: false, stage, error: `인증 실패 HTTP ${res.status}: ${body.slice(0, 200)}` }
+    }
+    // 404 = render not found (정상 — 키는 유효함)
+    return { ok: true, stage, note: res.status === 404 ? 'key valid (render not found as expected)' : `HTTP ${res.status}` }
+  } catch (err) {
+    return { ok: false, stage, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 async function testGemini(): Promise<{ ok: boolean; model?: string; error?: string }> {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) return { ok: false, error: 'GEMINI_API_KEY 없음' }
@@ -23,12 +43,13 @@ async function testGemini(): Promise<{ ok: boolean; model?: string; error?: stri
 }
 
 export async function GET() {
-  const [runs, postsByStatus, productCount, contentByStatus, gemini] = await Promise.all([
+  const [runs, postsByStatus, productCount, contentByStatus, gemini, shotstack] = await Promise.all([
     query('SELECT id, run_type, status, products_found, content_generated, posts_published, error, started_at, finished_at FROM automation_runs ORDER BY id DESC LIMIT 5'),
     query('SELECT status, COUNT(*) as c FROM scheduled_posts GROUP BY status'),
     query('SELECT COUNT(*) as c FROM products'),
     query('SELECT status, COUNT(*) as c FROM content GROUP BY status'),
     testGemini(),
+    testShotstack(),
   ])
   return NextResponse.json({
     automation_runs: runs,
@@ -38,5 +59,6 @@ export async function GET() {
     db_url: process.env.TURSO_DATABASE_URL ? 'turso' : 'local',
     mock_mode: process.env.USE_MOCK_DATA,
     gemini,
+    shotstack,
   })
 }

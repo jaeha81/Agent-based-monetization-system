@@ -136,6 +136,27 @@ export async function updateVideoMetadata(
   }
 }
 
+export async function patchVideoNotForKids(videoId: string): Promise<void> {
+  const accessToken = await refreshAccessToken()
+
+  const res = await fetch(`${YT_API}/videos?part=status`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      id: videoId,
+      status: { selfDeclaredMadeForKids: false },
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`YouTube 상태 업데이트 실패 (${videoId}): ${err}`)
+  }
+}
+
 export async function getChannelStats(): Promise<{
   subscriberCount: number
   viewCount: number
@@ -240,6 +261,41 @@ export async function getYouTubeAnalyticsRevenue(
     return { rows, totalRevenue, totalViews, hasMonetization: true }
   } catch {
     return { rows: [], totalRevenue: 0, totalViews: 0, hasMonetization: false }
+  }
+}
+
+export interface VideoDetail {
+  views: number
+  likes: number
+  privacy: 'public' | 'private' | 'unlisted' | 'unknown'
+  thumbnail: string
+  publishedAt: string | null
+}
+
+export async function getVideosStats(videoIds: string[]): Promise<Record<string, VideoDetail>> {
+  if (videoIds.length === 0) return {}
+  try {
+    const accessToken = await refreshAccessToken()
+    const idsParam = videoIds.slice(0, 50).join(',')
+    const res = await fetch(
+      `${YT_API}/videos?part=snippet,statistics,status&id=${encodeURIComponent(idsParam)}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    )
+    if (!res.ok) return {}
+    const data = await res.json()
+    const result: Record<string, VideoDetail> = {}
+    for (const item of data.items ?? []) {
+      result[item.id] = {
+        views: parseInt(item.statistics?.viewCount ?? '0'),
+        likes: parseInt(item.statistics?.likeCount ?? '0'),
+        privacy: item.status?.privacyStatus ?? 'unknown',
+        thumbnail: item.snippet?.thumbnails?.high?.url ?? item.snippet?.thumbnails?.default?.url ?? '',
+        publishedAt: item.snippet?.publishedAt ?? null,
+      }
+    }
+    return result
+  } catch {
+    return {}
   }
 }
 
