@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { runBrainScan, getActiveProblems, resolveProblem } from '@/lib/agent-brain'
+import { runBrainScan, getActiveProblems, resolveAndFix } from '@/lib/agent-brain'
 
-// GET /api/agent/brain — 활성 문제 목록 (가볍게)
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+// GET /api/agent/brain — 활성 문제 목록
 export async function GET() {
   try {
     const problems = await getActiveProblems()
@@ -21,14 +24,14 @@ export async function POST() {
   }
 }
 
-// PATCH /api/agent/brain?id=N — 문제 해결 처리
+// PATCH /api/agent/brain?id=N — 문제 자가 복구 실행 (단순 resolved 마킹 아님)
 export async function PATCH(req: NextRequest) {
   const id = Number(req.nextUrl.searchParams.get('id'))
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   try {
-    await resolveProblem(id)
-    return NextResponse.json({ ok: true })
+    const result = await resolveAndFix(id)
+    return NextResponse.json(result)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return NextResponse.json({ ok: false, action: 'error', detail: String(e) }, { status: 500 })
   }
 }

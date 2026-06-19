@@ -220,6 +220,9 @@ export default function AgentsPage() {
   const [cycleResult, setCycleResult] = useState<CycleResult | null>(null)
   const [brain, setBrain] = useState<BrainStatus | null>(null)
   const [brainScanning, setBrainScanning] = useState(false)
+  const [autoFixing, setAutoFixing] = useState(false)
+  const [autoFixLog, setAutoFixLog] = useState<string[]>([])
+  const [autoFixResult, setAutoFixResult] = useState<{ fixed: number; remaining: number; shotstackKeyValid: boolean } | null>(null)
 
   const load = useCallback(async () => {
     const res = await fetch('/api/agents/status')
@@ -245,8 +248,42 @@ export default function AgentsPage() {
   }
 
   const resolveProblem = async (id: number) => {
-    await fetch(`/api/agent/brain?id=${id}`, { method: 'PATCH' })
+    const res = await fetch(`/api/agent/brain?id=${id}`, { method: 'PATCH' })
+    const result = await res.json() as { ok: boolean; action: string; detail: string }
+    if (result.detail) {
+      alert(`[자가 복구 ${result.ok ? '완료' : '실패'}]\n${result.detail}`)
+    }
     await loadBrain()
+  }
+
+  const runAutoFix = async () => {
+    setAutoFixing(true)
+    setAutoFixLog([])
+    setAutoFixResult(null)
+    try {
+      const res = await fetch('/api/agent/autofix', { method: 'POST' })
+      const data = await res.json() as {
+        ok: boolean
+        cycle: number
+        scanned: number
+        fixed: number
+        remaining: number
+        shotstackKeyValid: boolean
+        log: string[]
+        elapsedMs: number
+      }
+      setAutoFixLog(data.log ?? [])
+      setAutoFixResult({
+        fixed: data.fixed ?? 0,
+        remaining: data.remaining ?? 0,
+        shotstackKeyValid: data.shotstackKeyValid ?? true,
+      })
+      await loadBrain()
+    } catch {
+      setAutoFixLog(['네트워크 오류 — 자동 수리 실패'])
+    } finally {
+      setAutoFixing(false)
+    }
   }
 
   useEffect(() => {
@@ -397,16 +434,58 @@ export default function AgentsPage() {
                 <Brain className="w-5 h-5 text-violet-600" />
                 <span className="font-bold text-violet-900">에이전트 두뇌</span>
               </div>
-              <button
-                onClick={runBrainScan}
-                disabled={brainScanning}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50"
-              >
-                {brainScanning
-                  ? <><RefreshCw className="w-3 h-3 animate-spin" />스캔 중...</>
-                  : <><Scan className="w-3 h-3" />두뇌 스캔</>}
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={runBrainScan}
+                  disabled={brainScanning || autoFixing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50"
+                >
+                  {brainScanning
+                    ? <><RefreshCw className="w-3 h-3 animate-spin" />스캔 중...</>
+                    : <><Scan className="w-3 h-3" />두뇌 스캔</>}
+                </button>
+                <button
+                  onClick={runAutoFix}
+                  disabled={autoFixing || brainScanning}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {autoFixing
+                    ? <><RefreshCw className="w-3 h-3 animate-spin" />수리 중...</>
+                    : <>&#x1F504; 자동 수리</>}
+                </button>
+              </div>
             </div>
+
+            {/* 자동 수리 결과 표시 */}
+            {(autoFixing || autoFixResult) && (
+              <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                {autoFixing && (
+                  <div className="flex items-center gap-2 text-xs text-emerald-700 mb-2">
+                    <RefreshCw className="w-3 h-3 animate-spin flex-shrink-0" />
+                    <span>자동 수리 실행 중...</span>
+                  </div>
+                )}
+                {autoFixLog.length > 0 && (
+                  <div className="space-y-0.5 max-h-36 overflow-y-auto mb-2">
+                    {autoFixLog.map((line, i) => (
+                      <p key={i} className="text-xs text-emerald-800 font-mono leading-relaxed">{line}</p>
+                    ))}
+                  </div>
+                )}
+                {autoFixResult && !autoFixing && (
+                  <>
+                    <p className="text-xs font-semibold text-emerald-900">
+                      {autoFixResult.fixed}건 수리 완료, {autoFixResult.remaining}건 잔여
+                    </p>
+                    {!autoFixResult.shotstackKeyValid && (
+                      <p className="mt-1 text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+                        &#9888;&#xFE0F; SHOTSTACK_API_KEY 무효 — Vercel 환경변수 교체 필요
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             {brain ? (
               <>

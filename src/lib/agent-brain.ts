@@ -144,18 +144,29 @@ async function detectProblems(): Promise<BrainProblem[]> {
       }
     }
 
-    // 2. Shotstack 렌더 실패 (48h)
-    const renderFails = await queryOne<{ count: number }>(
-      `SELECT COUNT(*) as count FROM workflow_jobs
+    // 2. Shotstack 렌더 실패 (48h) — 실제 에러 메시지 포함
+    const renderFailData = await queryOne<{ count: number; last_error: string | null }>(
+      `SELECT COUNT(*) as count, MAX(error) as last_error FROM workflow_jobs
        WHERE node_type='video_render' AND status='failed'
        AND created_at > datetime('now','-48 hours')`
     )
-    if (renderFails && renderFails.count > 0) {
+    if (renderFailData && renderFailData.count > 0) {
+      const errSnippet = renderFailData.last_error
+        ? `마지막 오류: ${renderFailData.last_error.slice(0, 120)}`
+        : '오류 메시지 없음 (DB 확인 필요)'
+      const isAuthError = renderFailData.last_error?.includes('401') || renderFailData.last_error?.includes('403') || renderFailData.last_error?.includes('invalid') || renderFailData.last_error?.includes('unauthorized')
+      const isTtsError = renderFailData.last_error?.toLowerCase().includes('tts') || renderFailData.last_error?.toLowerCase().includes('voice')
+      const recommendation = isAuthError
+        ? 'SHOTSTACK_API_KEY가 유효하지 않습니다. Vercel 환경변수에서 키를 재확인하세요.'
+        : isTtsError
+          ? 'TTS(음성합성) 오류입니다. Shotstack sandbox에서 TTS가 지원되지 않을 수 있습니다. stage→v1(production) 전환 확인.'
+          : 'SHOTSTACK_API_KEY 유효성 확인. SHOTSTACK_STAGE=v1 설정 여부 확인.'
       problems.push({
-        type: 'render_failure', severity: renderFails.count > 3 ? 'critical' : 'warning',
-        title: `Shotstack 렌더 실패 ${renderFails.count}건 (48h)`,
-        description: '영상 렌더링에 반복적으로 실패하고 있습니다. 업로드 콘텐츠가 없어집니다.',
-        recommendation: 'SHOTSTACK_API_KEY 유효성 확인. sandbox→production 전환 후 워터마크 없는 영상 확인.',
+        type: 'render_failure',
+        severity: renderFailData.count > 3 ? 'critical' : 'warning',
+        title: `Shotstack 렌더 실패 ${renderFailData.count}건 (48h)`,
+        description: `영상 렌더링에 반복적으로 실패하고 있습니다. ${errSnippet}`,
+        recommendation,
         resolved: false, detected_at: now,
       })
     }
@@ -351,4 +362,120 @@ export async function getActiveProblems(): Promise<BrainProblem[]> {
 
 export async function resolveProblem(id: number): Promise<void> {
   await execute(`UPDATE brain_problems SET resolved=1 WHERE id=?`, [id])
+}
+
+// ── 자가 복구: 문제 유형별 실제 픽스 액션 실행 ────────────────────────────────
+export async function resolveAndFix(
+  id: number
+): Promise<{ ok: boolean; action: string; detail: string }> {
+  let problem: (BrainProblem & { id: number }) | undefined = undefined
+  try {
+    problem = await queryOne<BrainProblem & { id: number }>(
+      `SELECT * FROM brain_problems WHERE id=?`, [id]
+    )
+  } catch { /* brain_problems 테이블 없으면 스킵 */ }
+
+  if (!problem) return { ok: false, action: 'not_found', detail: '문제를 찾을 수 없습니다.' }
+
+  try {
+    let action = ''
+    let detail = ''
+
+    switch (problem.type) {
+      case 'render_failure': {
+        // SHOTSTACK_API_KEY 미설정 시 재시도 무의미 — 즉시 중단
+        if (!process.env.SHOTSTACK_API_KEY?.trim()) {
+          return {
+            ok: false,
+            action: 'no_api_key',
+            detail: 'SHOTSTACK_API_KEY 미설정. Vercel 환경변수 확인 필요.',
+          }
+        }
+
+        // 실패한 video_render 잡을 queued로 재설정 → 다음 처리 사이클에서 재시도
+        const failedJobs = await query<{ id: number }>(
+          `SELECT id FROM workflow_jobs
+           WHERE node_type='video_render' AND status='failed'
+           AND created_at > datetime('now','-48 hours')`
+        )
+        if (failedJobs.length === 0) {
+          action = 'no_failed_jobs'
+          detail = '재시도할 실패 잡이 없습니다. 에러가 자연 소멸됐거나 이미 처리됨.'
+          break
+        }
+        for (const job of failedJobs) {
+          await execute(
+            `UPDATE workflow_jobs
+             SET status='queued', error=NULL, started_at=NULL, completed_at=NULL
+             WHERE id=?`,
+            [job.id]
+          )
+        }
+        // 실패한 잡 수만큼만 즉시 처리 (불필요한 전체 재처리 방지)
+        const { processPendingJobs } = await import('./workflow-engine')
+        await processPendingJobs(undefined, failedJobs.length)
+        action = 'render_requeued'
+        detail = `실패한 렌더 ${failedJobs.length}건을 재시도 큐에 넣고 즉시 처리를 시작했습니다.`
+        break
+      }
+
+      case 'upload_failure': {
+        // 실패한 scheduled_posts를 5분 후 재시도로 재설정
+        const { lastInsertRowid: affectedRows } = await execute(
+          `UPDATE scheduled_posts
+           SET status='pending', retry_count=0,
+               scheduled_for=datetime('now','+5 minutes'), error=NULL
+           WHERE status='failed' AND created_at > datetime('now','-48 hours')`
+        )
+        action = 'upload_requeued'
+        detail = `실패한 게시물을 5분 후 재시도 예약했습니다. (영향: ${affectedRows ?? '?'}건)`
+        break
+      }
+
+      case 'system_error': {
+        if (problem.title.includes('콘텐츠 생성')) {
+          // 콘텐츠 생성 중단 → 워크플로우 수동 트리거
+          const { startWorkflow } = await import('./workflow-engine')
+          const result = await startWorkflow('brain-autofix', 'manual')
+          action = 'workflow_triggered'
+          detail = `워크플로우를 수동으로 시작했습니다. (rootJob: ${result.rootJobId})`
+        } else {
+          action = 'acknowledged'
+          detail = '문제를 확인 처리했습니다. Vercel 로그를 직접 점검하세요.'
+        }
+        break
+      }
+
+      case 'low_performance': {
+        // 전부 비공개 → YouTube fix-kids-status 엔드포인트 호출
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
+        try {
+          const res = await fetch(`${baseUrl}/api/youtube/fix-kids-status`, { method: 'POST' })
+          const data = await res.json() as { fixed?: number; error?: string }
+          action = 'youtube_kids_fixed'
+          detail = data.error
+            ? `YouTube 상태 수정 실패: ${data.error}`
+            : `YouTube 영상 ${data.fixed ?? 0}건의 kids 상태를 수정했습니다. YouTube Studio에서 공개 전환하세요.`
+        } catch (e) {
+          action = 'youtube_fix_failed'
+          detail = `YouTube 수정 API 호출 실패: ${e instanceof Error ? e.message : String(e)}`
+        }
+        break
+      }
+
+      default: {
+        action = 'acknowledged'
+        detail = '문제를 확인 처리했습니다.'
+      }
+    }
+
+    await execute(`UPDATE brain_problems SET resolved=1 WHERE id=?`, [id])
+    return { ok: true, action, detail }
+  } catch (err) {
+    return {
+      ok: false,
+      action: 'error',
+      detail: err instanceof Error ? err.message : String(err),
+    }
+  }
 }
