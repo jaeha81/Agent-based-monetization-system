@@ -211,11 +211,43 @@ export function buildShortsDescription(
     script,
     '',
     '━━━━━━━━━━━━━━━━━━━━━━',
-    `🛒 구매링크: ${affiliateUrl}`,
+    '🛒 구매링크 → 아래 고정 댓글 확인 (클릭 가능)',
+    `구매링크: ${affiliateUrl}`,
     '━━━━━━━━━━━━━━━━━━━━━━',
     '',
     hashtags.map(h => `#${h}`).join(' '),
   ].join('\n')
+}
+
+// 유튜브 쇼츠 설명란 URL은 클릭 불가 → 고정 댓글로 클릭 가능한 구매 링크 제공
+export async function postTopComment(videoId: string, text: string): Promise<string | null> {
+  try {
+    const accessToken = await refreshAccessToken()
+    const res = await fetch(`${YT_API}/commentThreads?part=snippet`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        snippet: {
+          videoId,
+          topLevelComment: {
+            snippet: { textOriginal: text },
+          },
+        },
+      }),
+    })
+    if (!res.ok) {
+      console.warn('[YouTube] 댓글 게시 실패 (scope 부족일 수 있음):', await res.text())
+      return null
+    }
+    const data = await res.json()
+    return data.id as string
+  } catch (e) {
+    console.warn('[YouTube] 댓글 게시 오류:', e)
+    return null
+  }
 }
 
 export interface YouTubeAnalyticsDay {

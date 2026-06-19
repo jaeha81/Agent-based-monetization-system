@@ -238,9 +238,10 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
     product_name: string; coupang_url: string | null
     video_url: string | null; language: string | null
     render_id: string | null; retry_count: number
+    category: string
   }>(
     `SELECT sp.*, c.platform, c.hook, c.script, c.product_id, c.video_url, c.language, c.render_id,
-            p.name as product_name, p.coupang_url
+            p.name as product_name, p.coupang_url, p.category
      FROM scheduled_posts sp
      JOIN content c ON sp.content_id = c.id
      JOIN products p ON c.product_id = p.id
@@ -292,7 +293,10 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
               post.hook || post.product_name,
               post.product_name,
               post.language || 'ko',
-              callbackUrl
+              callbackUrl,
+              undefined,
+              post.category || '',
+              post.script || undefined
             )
             await execute('UPDATE content SET render_id = ? WHERE id = ?', [renderId, post.content_id])
             console.log(`[Publish] Shotstack 렌더 제출 완료: ${renderId} (webhook 대기)`)
