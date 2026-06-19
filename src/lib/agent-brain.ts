@@ -368,7 +368,7 @@ export async function resolveProblem(id: number): Promise<void> {
 export async function resolveAndFix(
   id: number
 ): Promise<{ ok: boolean; action: string; detail: string }> {
-  let problem: (BrainProblem & { id: number }) | null = null
+  let problem: (BrainProblem & { id: number }) | undefined = undefined
   try {
     problem = await queryOne<BrainProblem & { id: number }>(
       `SELECT * FROM brain_problems WHERE id=?`, [id]
@@ -383,6 +383,15 @@ export async function resolveAndFix(
 
     switch (problem.type) {
       case 'render_failure': {
+        // SHOTSTACK_API_KEY 미설정 시 재시도 무의미 — 즉시 중단
+        if (!process.env.SHOTSTACK_API_KEY?.trim()) {
+          return {
+            ok: false,
+            action: 'no_api_key',
+            detail: 'SHOTSTACK_API_KEY 미설정. Vercel 환경변수 확인 필요.',
+          }
+        }
+
         // 실패한 video_render 잡을 queued로 재설정 → 다음 처리 사이클에서 재시도
         const failedJobs = await query<{ id: number }>(
           `SELECT id FROM workflow_jobs
@@ -402,9 +411,9 @@ export async function resolveAndFix(
             [job.id]
           )
         }
-        // 즉시 처리 시도 (최대 3개)
+        // 실패한 잡 수만큼만 즉시 처리 (불필요한 전체 재처리 방지)
         const { processPendingJobs } = await import('./workflow-engine')
-        await processPendingJobs(undefined, 3)
+        await processPendingJobs(undefined, failedJobs.length)
         action = 'render_requeued'
         detail = `실패한 렌더 ${failedJobs.length}건을 재시도 큐에 넣고 즉시 처리를 시작했습니다.`
         break
