@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
           title: (content.hook || content.product_name).slice(0, 100),
           description,
           tags,
-          privacyStatus: 'public',
+          privacyStatus: 'private',
           madeForKids: false,
         }, videoBuffer)
 
