@@ -245,7 +245,11 @@ export default function AgentsPage() {
   }
 
   const resolveProblem = async (id: number) => {
-    await fetch(`/api/agent/brain?id=${id}`, { method: 'PATCH' })
+    const res = await fetch(`/api/agent/brain?id=${id}`, { method: 'PATCH' })
+    const result = await res.json() as { ok: boolean; action: string; detail: string }
+    if (result.detail) {
+      alert(`[자가 복구 ${result.ok ? '완료' : '실패'}]\n${result.detail}`)
+    }
     await loadBrain()
   }
 
