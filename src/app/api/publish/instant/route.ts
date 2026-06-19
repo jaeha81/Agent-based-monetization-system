@@ -12,10 +12,11 @@ export async function POST(req: NextRequest) {
 
   const content = await queryOne<{
     id: number; platform: string; hook: string | null; script: string | null
-    product_id: number; product_name: string; video_url: string | null; language: string | null
+    product_id: number; product_name: string; coupang_url: string | null
+    video_url: string | null; language: string | null
   }>(
     `SELECT c.id, c.platform, c.hook, c.script, c.video_url, c.language,
-            p.id as product_id, p.name as product_name
+            p.id as product_id, p.name as product_name, p.coupang_url
      FROM content c JOIN products p ON c.product_id = p.id WHERE c.id = ?`,
     [contentId]
   )
@@ -41,7 +42,9 @@ export async function POST(req: NextRequest) {
       videoUrl = await renderShortsVideo(
         content.hook || content.product_name,
         content.product_name,
-        content.language || 'ko'
+        content.language || 'ko',
+        content.script || undefined,
+        content.coupang_url || undefined,
       )
       await execute('UPDATE content SET video_url = ? WHERE id = ?', [videoUrl, contentId])
     }

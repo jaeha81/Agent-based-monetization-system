@@ -292,7 +292,9 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
               post.hook || post.product_name,
               post.product_name,
               post.language || 'ko',
-              callbackUrl
+              callbackUrl,
+              post.script || undefined,
+              post.coupang_url || undefined,
             )
             await execute('UPDATE content SET render_id = ? WHERE id = ?', [renderId, post.content_id])
             console.log(`[Publish] Shotstack 렌더 제출 완료: ${renderId} (webhook 대기)`)

@@ -239,8 +239,8 @@ async function nodeVideoRender(
 ): Promise<void> {
   if (!input.contentId) throw new Error('contentId required')
 
-  const content = await queryOne<{ id: number; hook: string | null; product_name: string }>(
-    `SELECT c.id, c.hook, p.name as product_name
+  const content = await queryOne<{ id: number; hook: string | null; script: string | null; product_name: string; coupang_url: string | null }>(
+    `SELECT c.id, c.hook, c.script, p.name as product_name, p.coupang_url
      FROM content c JOIN products p ON c.product_id = p.id WHERE c.id = ?`,
     [input.contentId]
   )
@@ -261,7 +261,9 @@ async function nodeVideoRender(
     content.hook || content.product_name,
     content.product_name,
     input.language || 'ko',
-    callbackUrl
+    callbackUrl,
+    content.script || undefined,
+    content.coupang_url || undefined,
   )
 
   // waiting 상태로 전환 — webhook이 올 때까지 대기
