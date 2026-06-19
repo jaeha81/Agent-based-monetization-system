@@ -241,6 +241,7 @@ const MIGRATIONS = [
   `ALTER TABLE content ADD COLUMN ai_disclosed INTEGER DEFAULT 1`,
   `ALTER TABLE content ADD COLUMN affiliate_disclosed INTEGER DEFAULT 1`,
   `ALTER TABLE content ADD COLUMN risk_level TEXT DEFAULT 'low'`,
+  `ALTER TABLE products ADD COLUMN price INTEGER DEFAULT 0`,
   `CREATE TABLE IF NOT EXISTS manual_revenue_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     platform TEXT NOT NULL,
