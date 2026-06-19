@@ -110,7 +110,7 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
         if (!product) continue
 
         const existingContent = await queryOne<{ c: number }>(
-          `SELECT COUNT(*) as c FROM content WHERE product_id = ? AND target_market = ? AND created_at > datetime('now', '-1 days')`,
+          `SELECT COUNT(*) as c FROM content WHERE product_id = ? AND target_market = ? AND created_at > datetime('now', '-14 days')`,
           [productId, market]
         )
         if ((existingContent?.c ?? 0) > 0) {
