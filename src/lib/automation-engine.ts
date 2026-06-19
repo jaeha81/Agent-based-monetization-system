@@ -7,7 +7,9 @@ import { runSeoAgent, buildOptimizedTags } from '@/lib/agents/seo-agent'
 import { buildShortsDescription } from '@/lib/youtube'
 import { sendDiscordWebhook, makeEmbed, COLORS } from '@/lib/discord'
 import { getActiveMarkets, buildAffiliateUrl, getAffiliateDisclosure, MARKETS } from '@/lib/markets'
-import { submitShotstackRender } from '@/lib/shotstack'
+import { submitShotstackRender, submitShotstackScenicRender } from '@/lib/shotstack'
+import { generateVideoScenario } from '@/lib/agents/scenario-agent'
+import { generateProductImage, buildProductImagePrompt } from '@/lib/agents/image-agent'
 import { postTistory, buildTistoryContent } from '@/lib/tistory'
 import { postInstagramReel } from '@/lib/instagram'
 import { postTikTokVideo } from '@/lib/tiktok'
@@ -235,12 +237,12 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
   const pending = await query<{
     id: number; content_id: number; platform: string
     hook: string; script: string; product_id: number
-    product_name: string; coupang_url: string | null
+    product_name: string; category: string | null; price: number | null; coupang_url: string | null
     video_url: string | null; language: string | null
     render_id: string | null; retry_count: number
   }>(
     `SELECT sp.*, c.platform, c.hook, c.script, c.product_id, c.video_url, c.language, c.render_id,
-            p.name as product_name, p.coupang_url
+            p.name as product_name, p.category, p.price, p.coupang_url
      FROM scheduled_posts sp
      JOIN content c ON sp.content_id = c.id
      JOIN products p ON c.product_id = p.id
@@ -283,25 +285,37 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
           continue
         }
 
-        // Submit async Shotstack render — webhook /api/webhook/shotstack will upload
+        // 시나리오+이미지 기반 Shotstack 렌더 제출
         if (process.env.SHOTSTACK_API_KEY) {
           const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
           const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
           try {
-            const renderId = await submitShotstackRender(
-              post.hook || post.product_name,
+            const language = post.language || 'ko'
+            const [scenario, imageBase64] = await Promise.all([
+              generateVideoScenario(
+                post.product_name,
+                post.category || '일반',
+                post.price || undefined,
+                language,
+                post.hook || undefined,
+                post.script || undefined,
+              ),
+              generateProductImage(buildProductImagePrompt(post.product_name, post.category || '일반')),
+            ])
+            const renderId = await submitShotstackScenicRender(
+              scenario,
               post.product_name,
-              post.language || 'ko',
+              imageBase64,
+              language,
               callbackUrl,
-              post.script || undefined,
               post.coupang_url || undefined,
             )
             await execute('UPDATE content SET render_id = ? WHERE id = ?', [renderId, post.content_id])
-            console.log(`[Publish] Shotstack 렌더 제출 완료: ${renderId} (webhook 대기)`)
+            console.log(`[Publish] Shotstack 시나리오 렌더 제출: ${renderId} (webhook 대기)`)
           } catch (vidErr) {
             console.error('[Publish] Shotstack 제출 실패:', vidErr)
           }
-          continue  // webhook이 업로드 처리
+          continue
         }
 
         // No Shotstack — YouTube upload requires a video file

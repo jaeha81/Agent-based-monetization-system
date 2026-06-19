@@ -1,7 +1,9 @@
 import { query, queryOne, execute } from '@/lib/db'
 import { searchTrendingProducts, generateAffiliateLink } from '@/lib/coupang'
 import { runContentAgent } from '@/lib/agents/content-agent'
-import { submitShotstackRender } from '@/lib/shotstack'
+import { submitShotstackRender, submitShotstackScenicRender } from '@/lib/shotstack'
+import { generateVideoScenario } from '@/lib/agents/scenario-agent'
+import { generateProductImage, buildProductImagePrompt } from '@/lib/agents/image-agent'
 import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags } from '@/lib/youtube'
 
 // ─── 타입 정의 ───────────────────────────────────────────────────────────────
@@ -239,30 +241,43 @@ async function nodeVideoRender(
 ): Promise<void> {
   if (!input.contentId) throw new Error('contentId required')
 
-  const content = await queryOne<{ id: number; hook: string | null; script: string | null; product_name: string; coupang_url: string | null }>(
-    `SELECT c.id, c.hook, c.script, p.name as product_name, p.coupang_url
+  const content = await queryOne<{ id: number; hook: string | null; script: string | null; product_name: string; category: string | null; price: number | null; coupang_url: string | null }>(
+    `SELECT c.id, c.hook, c.script, p.name as product_name, p.category, p.price, p.coupang_url
      FROM content c JOIN products p ON c.product_id = p.id WHERE c.id = ?`,
     [input.contentId]
   )
   if (!content) throw new Error(`Content ${input.contentId} not found`)
 
   if (!process.env.SHOTSTACK_API_KEY) {
-    // Shotstack 없으면 YouTube도 schedule_post로 fallback
     await completeJob(jobId, { skipped: true, reason: 'no_shotstack' })
     await createJob(workflowName, 'schedule_post', { contentId: input.contentId, platform: 'YouTube' }, triggerType)
     return
   }
 
-  // Shotstack webhook URL 구성
+  const language = input.language || 'ko'
+
+  // 시나리오 생성 (Gemini) + 제품 이미지 생성 (Stability AI) 병렬
+  const [scenario, imageBase64] = await Promise.all([
+    generateVideoScenario(
+      content.product_name,
+      content.category || '일반',
+      content.price || undefined,
+      language,
+      content.hook || undefined,
+      content.script || undefined,
+    ),
+    generateProductImage(buildProductImagePrompt(content.product_name, content.category || '일반')),
+  ])
+
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
   const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
 
-  const renderId = await submitShotstackRender(
-    content.hook || content.product_name,
+  const renderId = await submitShotstackScenicRender(
+    scenario,
     content.product_name,
-    input.language || 'ko',
+    imageBase64,
+    language,
     callbackUrl,
-    content.script || undefined,
     content.coupang_url || undefined,
   )
 
