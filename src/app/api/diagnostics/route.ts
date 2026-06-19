@@ -10,15 +10,16 @@ async function testShotstack(): Promise<{ ok: boolean; stage?: string; error?: s
   if (!key) return { ok: false, error: 'SHOTSTACK_API_KEY 없음' }
   const stage = process.env.SHOTSTACK_STAGE === 'v1' ? 'v1' : 'stage'
   try {
-    const res = await fetch(`https://api.shotstack.io/${stage}/renders?limit=5`, {
+    // 존재하지 않는 render ID로 GET — 인증 성공 시 404, 키 오류 시 401
+    const res = await fetch(`https://api.shotstack.io/${stage}/render/health-check-probe`, {
       headers: { 'x-api-key': key },
     })
-    if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
       const body = await res.text()
-      return { ok: false, stage, error: `HTTP ${res.status}: ${body.slice(0, 200)}` }
+      return { ok: false, stage, error: `인증 실패 HTTP ${res.status}: ${body.slice(0, 200)}` }
     }
-    const data = await res.json()
-    return { ok: true, stage, renders: data.response?.data?.length ?? 0 }
+    // 404 = render not found (정상 — 키는 유효함)
+    return { ok: true, stage, note: res.status === 404 ? 'key valid (render not found as expected)' : `HTTP ${res.status}` }
   } catch (err) {
     return { ok: false, stage, error: err instanceof Error ? err.message : String(err) }
   }
