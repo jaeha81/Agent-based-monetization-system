@@ -155,8 +155,8 @@ export function getCategoryCommissionRate(category: string): number {
 // 실제 쿠팡 베스트셀러 기반 바이럴 가능 큐레이션 풀 (API 없이 채널 ID 추적 링크 생성)
 const CURATED_POOL: Omit<CoupangProduct, 'ratingCount'>[] = [
   // 유아 7% — 단가 높고 커미션 최고
-  { productId: 2001, productName: '코니 바운서 밸런스 스트라이프 뉴본', productImage: '', productUrl: 'https://www.coupang.com/np/search?q=코니+바운서+밸런스', originalPrice: 79000, salePrice: 69900, categoryName: '유아', rating: 4.9, commissionRate: 7.0 },
-  { productId: 2002, productName: '스킵합 이지워시 범보 의자 트레이 포함', productImage: '', productUrl: 'https://www.coupang.com/np/search?q=범보의자+트레이', originalPrice: 49000, salePrice: 38900, categoryName: '유아', rating: 4.8, commissionRate: 7.0 },
+  { productId: 2001, productName: '포맘스 스마트 바운서 멀티스윙 신생아 바운서', productImage: '', productUrl: 'https://www.coupang.com/vp/products/7158777931', originalPrice: 239000, salePrice: 189000, categoryName: '유아', rating: 4.7, commissionRate: 7.0 },
+  { productId: 2002, productName: '아기 유아 식탁의자 하이체어 트레이 포함 높이조절', productImage: '', productUrl: 'https://www.coupang.com/vp/products/7865804529', originalPrice: 89000, salePrice: 59000, categoryName: '유아', rating: 4.6, commissionRate: 7.0 },
   { productId: 2003, productName: '모윰 실리콘 이유식 식판 흡착', productImage: '', productUrl: 'https://www.coupang.com/vp/products/1300547723', originalPrice: 18000, salePrice: 13900, categoryName: '유아', rating: 4.7, commissionRate: 7.0 },
   // 스포츠 6%
   { productId: 3001, productName: '솔로 테니스 리바운더 혼자치는 테니스', productImage: '', productUrl: 'https://www.coupang.com/vp/products/8027969106', originalPrice: 89000, salePrice: 79000, categoryName: '스포츠', rating: 4.6, commissionRate: 6.0 },
@@ -180,7 +180,7 @@ const CURATED_POOL: Omit<CoupangProduct, 'ratingCount'>[] = [
   { productId: 7002, productName: '앤커 나노 USB-C 고속충전기', productImage: '', productUrl: 'https://www.coupang.com/vp/products/6810349565', originalPrice: 32000, salePrice: 24900, categoryName: '전자기기', rating: 4.7, commissionRate: 1.5 },
   { productId: 7003, productName: '로지텍 M650 무선마우스 사일런트', productImage: '', productUrl: 'https://www.coupang.com/vp/products/7310195790', originalPrice: 49000, salePrice: 38900, categoryName: '전자기기', rating: 4.8, commissionRate: 1.5 },
   // 패션 2%
-  { productId: 8001, productName: '스탠다드 코튼 기본 반팔 티셔츠 19컬러', productImage: '', productUrl: 'https://www.coupang.com/np/search?q=기본+반팔+티셔츠+코튼', originalPrice: 15000, salePrice: 9900, categoryName: '패션', rating: 4.7, commissionRate: 2.0 },
+  { productId: 8001, productName: '유니클로 남성 에어리즘 코튼 오버사이즈 반팔 티셔츠', productImage: '', productUrl: 'https://www.coupang.com/vp/products/7962160729', originalPrice: 24900, salePrice: 19900, categoryName: '패션', rating: 4.8, commissionRate: 2.0 },
 ]
 
 function getCuratedProducts(keyword: string, limit: number): CoupangProduct[] {

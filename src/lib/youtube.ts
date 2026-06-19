@@ -136,6 +136,27 @@ export async function updateVideoMetadata(
   }
 }
 
+export async function patchVideoNotForKids(videoId: string): Promise<void> {
+  const accessToken = await refreshAccessToken()
+
+  const res = await fetch(`${YT_API}/videos?part=status`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      id: videoId,
+      status: { selfDeclaredMadeForKids: false },
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`YouTube 상태 업데이트 실패 (${videoId}): ${err}`)
+  }
+}
+
 export async function getChannelStats(): Promise<{
   subscriberCount: number
   viewCount: number
