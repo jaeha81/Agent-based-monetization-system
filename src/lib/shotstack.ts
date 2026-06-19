@@ -82,7 +82,8 @@ async function submitShotstackRenderSilent(
   callbackUrl?: string,
   affiliateUrl?: string,
 ): Promise<string> {
-  const key = process.env.SHOTSTACK_API_KEY!
+  const key = getShotstackKey()
+  if (!key) throw new Error('SHOTSTACK_API_KEY 미설정')
 
   const cta =
     language === 'ja' ? '🛒 説明欄リンクから購入'
