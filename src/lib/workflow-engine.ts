@@ -364,8 +364,8 @@ async function nodeYouTubeUpload(
   const description = buildShortsDescription(content.hook || content.script || '', affiliateUrl, tags)
   const pinnedComment = `🔥 최저가 링크 → ${affiliateUrl}`
 
-  // Veo URI(generativelanguage.googleapis.com)는 API 키 인증 다운로드, 일반 URL은 직접 fetch
-  const isVeoUri = input.videoUrl.includes('generativelanguage.googleapis.com')
+  // Veo URI: googleapis.com 또는 base64 data URI — API 키 인증 다운로드 또는 디코딩
+  const isVeoUri = input.videoUrl.includes('generativelanguage.googleapis.com') || input.videoUrl.startsWith('data:')
   const videoBuffer = isVeoUri
     ? await downloadVeoVideo(input.videoUrl)
     : Buffer.from(await (await fetch(input.videoUrl)).arrayBuffer())

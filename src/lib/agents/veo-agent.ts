@@ -49,24 +49,22 @@ export function buildVeoPrompt(
   )
 }
 
-// ─── 비동기 제출 (LRO 이름 반환) ──────────────────────────────────────────────
+// ─── 비동기 제출 (LRO 이름 반환) — predictLongRunning 사용 ──────────────────
 export async function submitVeoJob(prompt: string): Promise<string> {
   const key = getKey()
   if (!key) throw new Error('GEMINI_API_KEY 미설정 — Veo 사용 불가')
 
   const res = await fetch(
-    `${BASE}/models/${MODEL}:generateVideo?key=${key}`,
+    `${BASE}/models/${MODEL}:predictLongRunning?key=${key}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: `models/${MODEL}`,
-        prompt: { text: prompt },
-        config: {
+        instances: [{ prompt }],
+        parameters: {
           aspectRatio: '9:16',
-          durationSec: 8,
+          durationSeconds: 8,
           sampleCount: 1,
-          enhancePrompt: true,
         },
       }),
     }
@@ -74,7 +72,7 @@ export async function submitVeoJob(prompt: string): Promise<string> {
 
   if (!res.ok) {
     const errText = await res.text()
-    throw new Error(`Veo 제출 실패 (${res.status}): ${errText.slice(0, 300)}`)
+    throw new Error(`Veo 제출 실패 (${res.status}): ${errText.slice(0, 400)}`)
   }
 
   const data = await res.json() as { name?: string }
@@ -103,6 +101,13 @@ export async function pollVeoJob(renderId: string): Promise<{
   const data = await res.json() as {
     done?: boolean
     response?: {
+      // predictLongRunning 응답 형식
+      predictions?: Array<{
+        bytesBase64Encoded?: string
+        mimeType?: string
+        video?: { uri?: string }
+      }>
+      // 구버전 generateVideo 응답 형식 (호환성 유지)
       generatedVideos?: Array<{ video?: { uri: string; mimeType?: string } }>
     }
     error?: { message: string; code?: number }
@@ -112,7 +117,23 @@ export async function pollVeoJob(renderId: string): Promise<{
     return { status: 'failed', error: `Veo 오류: ${data.error.message}` }
   }
 
-  if (data.done && data.response?.generatedVideos?.[0]?.video?.uri) {
+  if (!data.done) return { status: 'pending' }
+
+  // predictions 배열 (predictLongRunning 응답)
+  const predictions = data.response?.predictions
+  if (predictions && predictions.length > 0) {
+    const pred = predictions[0]
+    if (pred.video?.uri) {
+      return { status: 'done', videoUri: pred.video.uri }
+    }
+    // base64 인코딩 응답 — data URI로 변환 (downloadVeoVideo에서 디코딩)
+    if (pred.bytesBase64Encoded) {
+      return { status: 'done', videoUri: `data:video/mp4;base64,${pred.bytesBase64Encoded}` }
+    }
+  }
+
+  // 구버전 generateVideo 응답 (호환성)
+  if (data.response?.generatedVideos?.[0]?.video?.uri) {
     return {
       status: 'done',
       videoUri: data.response.generatedVideos[0].video!.uri,
@@ -122,8 +143,14 @@ export async function pollVeoJob(renderId: string): Promise<{
   return { status: 'pending' }
 }
 
-// ─── 영상 다운로드 (Gemini Files API 인증) ────────────────────────────────────
+// ─── 영상 다운로드 (Gemini Files API 인증 또는 base64 디코딩) ─────────────────
 export async function downloadVeoVideo(uri: string): Promise<Buffer> {
+  // base64 data URI 처리
+  if (uri.startsWith('data:')) {
+    const base64Data = uri.split(',')[1]
+    return Buffer.from(base64Data, 'base64')
+  }
+
   const key = getKey()
   if (!key) throw new Error('GEMINI_API_KEY 미설정')
 
