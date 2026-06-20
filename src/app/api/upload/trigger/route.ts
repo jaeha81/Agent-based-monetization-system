@@ -53,9 +53,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const baseUrl = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : 'https://shorts-dashboard-one.vercel.app'
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
     const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
     const language = content.language || 'ko'
     const productName = content.product_name
