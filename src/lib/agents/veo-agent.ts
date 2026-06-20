@@ -1,4 +1,4 @@
-import type { VideoScenario } from './scenario-agent'
+import type { VideoScenario, SceneDefinition } from './scenario-agent'
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta'
 const MODEL = 'veo-2.0-generate-001'
@@ -10,36 +10,42 @@ export const VEO_PREFIX = 'veo:'
 export const isVeoRender = (renderId: string) => renderId.startsWith(VEO_PREFIX)
 export const toVeoOp = (renderId: string) => renderId.slice(VEO_PREFIX.length)
 
+// @everyday-c 스타일 기반 씬별 Veo 프롬프트 생성
+export function buildSceneVeoPrompt(
+  scene: SceneDefinition,
+  productName: string,
+): string {
+  const base = `${scene.veoPrompt}, no text overlay, no subtitles, 9:16 vertical aspect ratio`
+  return base
+}
+
+// 기존 단일 프롬프트 빌더 (Shotstack 폴백용으로 유지)
 export function buildVeoPrompt(
   scenario: VideoScenario,
   productName: string,
   language: string = 'ko',
 ): string {
-  const points = scenario.performancePoints.slice(0, 2).join(', ')
-  if (language === 'ko') {
-    return (
-      `고품질 상업 광고 영상 8초. 제품명: ${productName}. ` +
-      `핵심 메시지: ${scenario.hook}. ` +
-      `주요 특징: ${points}. ` +
-      `가격 포인트: ${scenario.priceText}. ` +
-      `세로형(9:16), 전문 제품 클로즈업, 밝은 스튜디오 조명, ` +
-      `다이나믹 카메라 무빙, 상업 광고 스타일, 텍스트 없음, ` +
-      `깔끔한 그라디언트 배경, 4K 고해상도`
-    )
+  // scenes가 있으면 hero 씬(씬2) 프롬프트 우선 사용
+  if (scenario.scenes && scenario.scenes.length >= 2) {
+    const heroScene = scenario.scenes[1]
+    return `${heroScene.veoPrompt}, no text overlay, 9:16 vertical, 8 seconds`
   }
+
+  const points = scenario.performancePoints.slice(0, 2).join(', ')
   if (language === 'ja') {
     return (
-      `高品質な商業広告動画 8秒. 製品名: ${productName}. ` +
-      `キャッチコピー: ${scenario.hook}. 特長: ${points}. ` +
-      `縦型(9:16)、プロの製品クローズアップ、明るいスタジオ照明、` +
-      `ダイナミックカメラ、テキストなし、グラデーション背景`
+      `High-quality 8-second commercial product video. Product: ${productName}. ` +
+      `Key message: ${scenario.hook}. Features: ${points}. ` +
+      `Vertical 9:16, dramatic product reveal on marble surface, studio lighting, ` +
+      `dynamic camera movement, no text overlay, clean background, 4K`
     )
   }
+  // ko/en 공통 — @everyday-c 스타일 (마블 테이블, 드라마틱 등장)
   return (
-    `High-quality 8-second commercial video. Product: ${productName}. ` +
-    `Hook: ${scenario.hook}. Features: ${points}. Price: ${scenario.priceText}. ` +
-    `Vertical 9:16, professional product close-up, bright studio lighting, ` +
-    `dynamic camera movement, commercial style, no text overlay, clean gradient background`
+    `8-second product showcase video, ${productName} dramatically revealed on white marble surface, ` +
+    `professional studio lighting with rim light, slow 360 rotation or zoom-in reveal, ` +
+    `Korean shopping channel aesthetic, clean white/gradient background, ` +
+    `cinematic slow motion, no text overlay, 9:16 vertical, 4K high quality`
   )
 }
 

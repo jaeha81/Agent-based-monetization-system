@@ -4,7 +4,7 @@ import { runContentAgent } from '@/lib/agents/content-agent'
 import { submitShotstackScenicRender } from '@/lib/shotstack'
 import { generateVideoScenario } from '@/lib/agents/scenario-agent'
 import { generateProductImage, buildProductImagePrompt } from '@/lib/agents/image-agent'
-import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags } from '@/lib/youtube'
+import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags, postTopComment } from '@/lib/youtube'
 import { submitVeoJob, buildVeoPrompt, downloadVeoVideo } from '@/lib/agents/veo-agent'
 
 // ─── 타입 정의 ───────────────────────────────────────────────────────────────
@@ -269,6 +269,7 @@ async function nodeVideoRender(
       language,
       content.hook || undefined,
       content.script || undefined,
+      content.coupang_url || undefined,
     ),
     generateProductImage(
       buildProductImagePrompt(content.product_name, content.category || '일반'),
@@ -359,7 +360,9 @@ async function nodeYouTubeUpload(
 
   const tags = buildShortsTags(content.product_name, content.category)
   const affiliateUrl = content.coupang_url || 'https://www.coupang.com'
-  const description = buildShortsDescription(content.script || '', affiliateUrl, tags)
+  // @everyday-c 스타일: 훅→링크→해시태그 순서
+  const description = buildShortsDescription(content.hook || content.script || '', affiliateUrl, tags)
+  const pinnedComment = `🔥 최저가 링크 → ${affiliateUrl}`
 
   // Veo URI(generativelanguage.googleapis.com)는 API 키 인증 다운로드, 일반 URL은 직접 fetch
   const isVeoUri = input.videoUrl.includes('generativelanguage.googleapis.com')
@@ -383,6 +386,9 @@ async function nodeYouTubeUpload(
   )
 
   await completeJob(jobId, { videoId: result.videoId, url: result.url })
+
+  // 고정 댓글 — 쿠팡 파트너스 링크 (클릭 가능)
+  await postTopComment(result.videoId, pinnedComment)
 
   // 훅 발동: uploaded → revenue_sync + notify 병렬 큐
   const r1 = await createJob(workflowName, 'revenue_sync', { contentId: input.contentId }, 'webhook')
