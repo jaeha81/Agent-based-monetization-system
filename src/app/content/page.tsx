@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Sparkles, Copy, Check, Upload, Pencil, Trash2, RefreshCw, Send, List } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Sparkles, Copy, Check, Upload, Pencil, Trash2, RefreshCw, Send, List, Film } from 'lucide-react'
 
 const PLATFORM_COLORS: Record<string, string> = {
   YouTube: 'bg-red-500', Instagram: 'bg-pink-500', TikTok: 'bg-gray-800',
@@ -34,6 +34,9 @@ export default function ContentPage() {
   const [editFields, setEditFields] = useState<{ hook: string; script: string }>({ hook: '', script: '' })
   const [publishing, setPublishing] = useState<number | null>(null)
   const [publishResult, setPublishResult] = useState<Record<number, string>>({})
+  const [veoTargetId, setVeoTargetId] = useState<number | null>(null)
+  const [veoUploading, setVeoUploading] = useState<number | null>(null)
+  const veoInputRef = useRef<HTMLInputElement>(null)
 
   const loadLibrary = useCallback(async () => {
     setLibraryLoading(true)
@@ -116,6 +119,41 @@ export default function ContentPage() {
     } finally { setPublishing(null) }
   }
 
+  function openVeoPicker(contentId: number) {
+    setVeoTargetId(contentId)
+    veoInputRef.current?.click()
+  }
+
+  async function handleVeoFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !veoTargetId) return
+    e.target.value = ''
+
+    setVeoUploading(veoTargetId)
+    setPublishResult(r => ({ ...r, [veoTargetId]: '' }))
+    const targetId = veoTargetId
+    setVeoTargetId(null)
+
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('content_id', String(targetId))
+
+      const res = await fetch('/api/upload/video', { method: 'POST', body: form })
+      const data = await res.json()
+      if (data.ok) {
+        setPublishResult(r => ({ ...r, [targetId]: `✓ YouTube 업로드 완료 ${data.url}` }))
+        loadLibrary()
+      } else {
+        setPublishResult(r => ({ ...r, [targetId]: `✕ ${data.error}` }))
+      }
+    } catch {
+      setPublishResult(r => ({ ...r, [targetId]: '✕ 업로드 실패' }))
+    } finally {
+      setVeoUploading(null)
+    }
+  }
+
   const grouped = library.reduce<Record<string, ContentRow[]>>((acc, row) => {
     const key = row.product_name
     if (!acc[key]) acc[key] = []
@@ -131,6 +169,14 @@ export default function ContentPage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
+      {/* 숨겨진 Veo 영상 파일 선택 input */}
+      <input
+        ref={veoInputRef}
+        type="file"
+        accept="video/*"
+        className="hidden"
+        onChange={handleVeoFileSelect}
+      />
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold">콘텐츠 관리</h2>
@@ -279,6 +325,18 @@ export default function ContentPage() {
                           <button onClick={() => startEdit(row)} title="편집" className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded">
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
+                          {row.platform === 'YouTube' && row.status !== 'posted' && (
+                            <button
+                              onClick={() => openVeoPicker(row.id)}
+                              disabled={veoUploading === row.id}
+                              title="Gemini Veo 영상 업로드"
+                              className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded disabled:opacity-50"
+                            >
+                              {veoUploading === row.id
+                                ? <Film className="w-3.5 h-3.5 animate-pulse text-purple-500" />
+                                : <Film className="w-3.5 h-3.5" />}
+                            </button>
+                          )}
                           {row.status !== 'posted' && (
                             <button
                               onClick={() => instantPublish(row)}
