@@ -1,10 +1,11 @@
 import { query, queryOne, execute } from '@/lib/db'
 import { searchTrendingProducts, generateAffiliateLink } from '@/lib/coupang'
 import { runContentAgent } from '@/lib/agents/content-agent'
-import { submitShotstackRender, submitShotstackScenicRender } from '@/lib/shotstack'
+import { submitShotstackScenicRender } from '@/lib/shotstack'
 import { generateVideoScenario } from '@/lib/agents/scenario-agent'
 import { generateProductImage, buildProductImagePrompt } from '@/lib/agents/image-agent'
 import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags } from '@/lib/youtube'
+import { submitVeoJob, buildVeoPrompt, downloadVeoVideo } from '@/lib/agents/veo-agent'
 
 // ─── 타입 정의 ───────────────────────────────────────────────────────────────
 
@@ -248,15 +249,18 @@ async function nodeVideoRender(
   )
   if (!content) throw new Error(`Content ${input.contentId} not found`)
 
-  if (!process.env.SHOTSTACK_API_KEY) {
-    await completeJob(jobId, { skipped: true, reason: 'no_shotstack' })
+  const hasVeo = !!process.env.GEMINI_API_KEY
+  const hasShotstack = !!process.env.SHOTSTACK_API_KEY
+
+  if (!hasVeo && !hasShotstack) {
+    await completeJob(jobId, { skipped: true, reason: 'no_video_engine' })
     await createJob(workflowName, 'schedule_post', { contentId: input.contentId, platform: 'YouTube' }, triggerType)
     return
   }
 
   const language = input.language || 'ko'
 
-  // 시나리오 생성 (Gemini) + 제품 이미지 생성 (Stability AI → Unsplash 폴백) 병렬
+  // 시나리오 생성 (Gemini) + 제품 이미지 생성 병렬
   const [scenario, imageUrl] = await Promise.all([
     generateVideoScenario(
       content.product_name,
@@ -273,17 +277,25 @@ async function nodeVideoRender(
     ),
   ])
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
-  const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
-
-  const renderId = await submitShotstackScenicRender(
-    scenario,
-    content.product_name,
-    imageUrl,
-    language,
-    callbackUrl,
-    content.coupang_url || undefined,
-  )
+  // ① Veo 우선 (Gemini Pro 구독 기반), ② Shotstack 폴백
+  let renderId: string
+  if (hasVeo) {
+    try {
+      const veoPrompt = buildVeoPrompt(scenario, content.product_name, language)
+      renderId = await submitVeoJob(veoPrompt)
+      console.log(`[Workflow] Veo 영상 생성 시작: ${renderId}`)
+    } catch (veoErr) {
+      if (!hasShotstack) throw veoErr
+      console.warn('[Workflow] Veo 실패, Shotstack 폴백:', veoErr instanceof Error ? veoErr.message : String(veoErr))
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
+      const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
+      renderId = await submitShotstackScenicRender(scenario, content.product_name, imageUrl, language, callbackUrl, content.coupang_url || undefined)
+    }
+  } else {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
+    const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
+    renderId = await submitShotstackScenicRender(scenario, content.product_name, imageUrl, language, callbackUrl, content.coupang_url || undefined)
+  }
 
   // waiting 상태로 전환 — webhook이 올 때까지 대기
   await execute(
@@ -349,8 +361,11 @@ async function nodeYouTubeUpload(
   const affiliateUrl = content.coupang_url || 'https://www.coupang.com'
   const description = buildShortsDescription(content.script || '', affiliateUrl, tags)
 
-  const videoRes = await fetch(input.videoUrl)
-  const videoBuffer = Buffer.from(await videoRes.arrayBuffer())
+  // Veo URI(generativelanguage.googleapis.com)는 API 키 인증 다운로드, 일반 URL은 직접 fetch
+  const isVeoUri = input.videoUrl.includes('generativelanguage.googleapis.com')
+  const videoBuffer = isVeoUri
+    ? await downloadVeoVideo(input.videoUrl)
+    : Buffer.from(await (await fetch(input.videoUrl)).arrayBuffer())
 
   const result = await uploadYouTubeShorts({
     title: (content.hook || content.product_name).slice(0, 100),

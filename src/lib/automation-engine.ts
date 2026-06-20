@@ -7,7 +7,8 @@ import { runSeoAgent, buildOptimizedTags } from '@/lib/agents/seo-agent'
 import { buildShortsDescription } from '@/lib/youtube'
 import { sendDiscordWebhook, makeEmbed, COLORS } from '@/lib/discord'
 import { getActiveMarkets, buildAffiliateUrl, getAffiliateDisclosure, MARKETS } from '@/lib/markets'
-import { submitShotstackRender, submitShotstackScenicRender } from '@/lib/shotstack'
+import { submitShotstackScenicRender } from '@/lib/shotstack'
+import { submitVeoJob, buildVeoPrompt } from '@/lib/agents/veo-agent'
 import { generateVideoScenario } from '@/lib/agents/scenario-agent'
 import { generateProductImage, buildProductImagePrompt } from '@/lib/agents/image-agent'
 import { postTistory, buildTistoryContent } from '@/lib/tistory'
@@ -285,46 +286,56 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
           continue
         }
 
-        // 시나리오+이미지 기반 Shotstack 렌더 제출
-        if (process.env.SHOTSTACK_API_KEY) {
-          const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
-          const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
-          try {
-            const language = post.language || 'ko'
-            const [scenario, imageUrl] = await Promise.all([
-              generateVideoScenario(
-                post.product_name,
-                post.category || '일반',
-                post.price || undefined,
-                language,
-                post.hook || undefined,
-                post.script || undefined,
-              ),
-              generateProductImage(
-                buildProductImagePrompt(post.product_name, post.category || '일반'),
-                post.category || '일반',
-                post.product_name,
-              ),
-            ])
-            const renderId = await submitShotstackScenicRender(
-              scenario,
-              post.product_name,
-              imageUrl,
-              language,
-              callbackUrl,
-              post.coupang_url || undefined,
-            )
-            await execute('UPDATE content SET render_id = ? WHERE id = ?', [renderId, post.content_id])
-            console.log(`[Publish] Shotstack 시나리오 렌더 제출: ${renderId} (webhook 대기)`)
-          } catch (vidErr) {
-            console.error('[Publish] Shotstack 제출 실패:', vidErr)
-          }
+        // Veo(구독) 우선 → Shotstack 폴백
+        const hasVeo = !!process.env.GEMINI_API_KEY
+        const hasShotstack = !!process.env.SHOTSTACK_API_KEY
+        if (!hasVeo && !hasShotstack) {
+          console.warn(`[Publish] YouTube ${post.id} 건너뜀: 영상 엔진 미설정`)
           continue
         }
 
-        // No Shotstack — YouTube upload requires a video file
-        console.warn(`[Publish] YouTube ${post.id} 건너뜀: SHOTSTACK_API_KEY 미설정 (영상 없음)`)
-        continue  // FIX: 이전엔 여기서 "other platforms" 블록으로 fall-through하여 published 처리됐음
+        try {
+          const language = post.language || 'ko'
+          const [scenario, imageUrl] = await Promise.all([
+            generateVideoScenario(
+              post.product_name,
+              post.category || '일반',
+              post.price || undefined,
+              language,
+              post.hook || undefined,
+              post.script || undefined,
+            ),
+            generateProductImage(
+              buildProductImagePrompt(post.product_name, post.category || '일반'),
+              post.category || '일반',
+              post.product_name,
+            ),
+          ])
+
+          let renderId: string
+          if (hasVeo) {
+            try {
+              renderId = await submitVeoJob(buildVeoPrompt(scenario, post.product_name, language))
+              console.log(`[Publish] Veo 영상 생성 시작: ${renderId}`)
+            } catch (veoErr) {
+              if (!hasShotstack) throw veoErr
+              console.warn('[Publish] Veo 실패, Shotstack 폴백:', veoErr instanceof Error ? veoErr.message : String(veoErr))
+              const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
+              const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
+              renderId = await submitShotstackScenicRender(scenario, post.product_name, imageUrl, language, callbackUrl, post.coupang_url || undefined)
+            }
+          } else {
+            const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
+            const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
+            renderId = await submitShotstackScenicRender(scenario, post.product_name, imageUrl, language, callbackUrl, post.coupang_url || undefined)
+          }
+
+          await execute('UPDATE content SET render_id = ? WHERE id = ?', [renderId, post.content_id])
+          console.log(`[Publish] 렌더 제출 완료: ${renderId}`)
+        } catch (vidErr) {
+          console.error('[Publish] 영상 생성 제출 실패:', vidErr)
+        }
+        continue
       }
 
       // Other platforms — real API posting

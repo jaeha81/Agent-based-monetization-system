@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { runBrainScan, getActiveProblems, resolveAndFix } from '@/lib/agent-brain'
 import { queryOne, execute, query } from '@/lib/db'
 import { pollShotstackRender } from '@/lib/shotstack'
+import { pollVeoJob, isVeoRender } from '@/lib/agents/veo-agent'
 import { resumeVideoRenderJob } from '@/lib/workflow-engine'
 
 export const runtime = 'nodejs'
@@ -100,44 +101,68 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
 
     log.push(`수리 완료: ${fixed}건 성공`)
 
-    // ── 4b. Shotstack waiting 렌더 폴링 (sandbox webhook 불가 대응) ──────────
+    // ── 4b. 렌더 폴링 (Veo + Shotstack) ──────────────────────────────────────
     let renderResumed = 0
-    if (process.env.SHOTSTACK_API_KEY) {
-      try {
-        const waitingJobs = await query<{ id: number; render_id: string }>(
-          `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL LIMIT 10`
-        )
-        if (waitingJobs.length > 0) {
-          log.push(`렌더 폴링: waiting 잡 ${waitingJobs.length}건 확인 중...`)
-          for (const job of waitingJobs) {
-            try {
+    try {
+      const waitingJobs = await query<{ id: number; render_id: string }>(
+        `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL LIMIT 10`
+      )
+
+      if (waitingJobs.length > 0) {
+        log.push(`렌더 폴링: waiting 잡 ${waitingJobs.length}건 확인 중...`)
+        for (const job of waitingJobs) {
+          try {
+            if (isVeoRender(job.render_id)) {
+              // ─ Veo 폴링 ─
+              if (!process.env.GEMINI_API_KEY) {
+                log.push(`  ↷ Veo ${job.render_id.slice(0, 30)}... — GEMINI_API_KEY 없음, 건너뜀`)
+                continue
+              }
+              const poll = await pollVeoJob(job.render_id)
+              if (poll.status === 'done' && poll.videoUri) {
+                await resumeVideoRenderJob(job.render_id, poll.videoUri)
+                renderResumed++
+                log.push(`  ✓ [Veo] ${job.render_id.slice(4, 34)}... 완료 → youtube_upload 트리거`)
+              } else if (poll.status === 'failed') {
+                await execute(
+                  `UPDATE workflow_jobs SET status = 'failed', error = ? WHERE id = ?`,
+                  [poll.error || 'Veo render failed', job.id]
+                )
+                log.push(`  ✕ [Veo] ${job.render_id.slice(4, 34)}... 실패: ${poll.error}`)
+              } else {
+                log.push(`  ⏳ [Veo] ${job.render_id.slice(4, 34)}... 생성 중`)
+              }
+            } else {
+              // ─ Shotstack 폴링 ─
+              if (!process.env.SHOTSTACK_API_KEY || !shotstackKeyValid) {
+                log.push(`  ↷ Shotstack ${job.render_id.slice(0, 20)}... — 키 없음/무효, 건너뜀`)
+                continue
+              }
               const poll = await pollShotstackRender(job.render_id)
               if (poll.status === 'done' && poll.url) {
                 await resumeVideoRenderJob(job.render_id, poll.url)
                 renderResumed++
-                log.push(`  ✓ render_id=${job.render_id} 완료 → youtube_upload 트리거`)
+                log.push(`  ✓ [Shotstack] ${job.render_id.slice(0, 20)}... 완료 → youtube_upload 트리거`)
               } else if (poll.status === 'failed') {
                 await execute(
-                  `UPDATE workflow_jobs SET status = 'failed', error = 'Shotstack render failed', updated_at = datetime('now') WHERE id = ?`,
+                  `UPDATE workflow_jobs SET status = 'failed', error = 'Shotstack render failed' WHERE id = ?`,
                   [job.id]
                 )
-                log.push(`  ✕ render_id=${job.render_id} 실패 처리`)
+                log.push(`  ✕ [Shotstack] ${job.render_id.slice(0, 20)}... 실패`)
               } else {
-                log.push(`  ⏳ render_id=${job.render_id} 진행 중 (${poll.status})`)
+                log.push(`  ⏳ [Shotstack] ${job.render_id.slice(0, 20)}... 진행 중 (${poll.status})`)
               }
-            } catch (e) {
-              log.push(`  ✕ render_id=${job.render_id} 폴링 오류: ${e instanceof Error ? e.message.slice(0, 60) : String(e).slice(0, 60)}`)
             }
+          } catch (e) {
+            log.push(`  ✕ ${job.render_id.slice(0, 30)}... 폴링 오류: ${e instanceof Error ? e.message.slice(0, 60) : String(e).slice(0, 60)}`)
           }
-          log.push(`렌더 폴링 완료: ${renderResumed}건 유튜브 업로드 트리거됨`)
-        } else {
-          log.push('렌더 폴링: waiting 잡 없음')
         }
-      } catch (e) {
-        log.push(`렌더 폴링 오류: ${e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80)}`)
+        log.push(`렌더 폴링 완료: ${renderResumed}건 유튜브 업로드 트리거됨`)
+      } else {
+        log.push('렌더 폴링: waiting 잡 없음')
       }
-    } else {
-      log.push('렌더 폴링 건너뜀: SHOTSTACK_API_KEY 미설정')
+    } catch (e) {
+      log.push(`렌더 폴링 오류: ${e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80)}`)
     }
 
     // ── 5. 수리 후 재스캔 (After) ──────────────────────────────────────────
