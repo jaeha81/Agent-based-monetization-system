@@ -6,8 +6,8 @@ const STAGE = () => (process.env.SHOTSTACK_STAGE === 'v1' ? 'v1' : 'stage')
 // BOM 및 공백 제거
 const getShotstackKey = () => process.env.SHOTSTACK_API_KEY?.replace(/^﻿/, '').trim()
 
-// 무료 배경음악 (Shotstack 공개 에셋)
-const BG_MUSIC_URL = 'https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/unminus/commercial-advertisement.mp3'
+// Production에서 접근 불가한 sandbox 전용 에셋 → 음악 없이 처리
+const BG_MUSIC_URL = ''
 
 const BG_GRADIENTS = [
   '#0f0c29,#302b63,#24243e',
@@ -110,14 +110,15 @@ function buildRenderBody(
   soundtrackSrc: string,
   callbackUrl?: string,
 ) {
+  const timeline: Record<string, unknown> = {
+    tracks: [
+      ...imageTracks,
+      { clips: scenes },
+    ],
+  }
+  if (soundtrackSrc) timeline.soundtrack = { src: soundtrackSrc, effect: 'fadeOut', volume: 0.8 }
   const body: Record<string, unknown> = {
-    timeline: {
-      soundtrack: { src: soundtrackSrc, effect: 'fadeOut', volume: 0.8 },
-      tracks: [
-        ...imageTracks,
-        { clips: scenes },
-      ],
-    },
+    timeline,
     output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 },
   }
   if (callbackUrl) body.callback = callbackUrl
@@ -143,11 +144,12 @@ export async function submitShotstackRender(
   const ttsVoice = language === 'ko' ? 'Seoyeon' : language === 'ja' ? 'Mizuki' : 'Amy'
   const soundtrackSrc = await buildSoundtrackSrc(ttsText, ttsVoice, language)
 
+  const timeline: Record<string, unknown> = {
+    tracks: [{ clips: [{ asset: { type: 'html', html, width: 1080, height: 1920 }, start: 0, length: 30, fit: 'none' }] }],
+  }
+  if (soundtrackSrc) timeline.soundtrack = { src: soundtrackSrc, effect: 'fadeOut', volume: 0.8 }
   const body: Record<string, unknown> = {
-    timeline: {
-      soundtrack: { src: soundtrackSrc, effect: 'fadeOut', volume: 0.8 },
-      tracks: [{ clips: [{ asset: { type: 'html', html, width: 1080, height: 1920 }, start: 0, length: 30, fit: 'none' }] }],
-    },
+    timeline,
     output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 },
   }
   if (callbackUrl) body.callback = callbackUrl
@@ -159,8 +161,8 @@ export async function submitShotstackRender(
   })
 
   if (!res.ok) {
-    // 배경음악으로 재시도
-    ;(body.timeline as Record<string, unknown>).soundtrack = { src: BG_MUSIC_URL, effect: 'fadeOut', volume: 0.8 }
+    // soundtrack 없이 재시도
+    delete (body.timeline as Record<string, unknown>).soundtrack
     res = await fetch(`${BASE}/${STAGE()}/render`, {
       method: 'POST',
       headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
@@ -190,13 +192,13 @@ export async function renderShortsVideo(
   const ttsVoice = language === 'ko' ? 'Seoyeon' : language === 'ja' ? 'Mizuki' : 'Amy'
   const soundtrackSrc = await buildSoundtrackSrc(ttsText, ttsVoice, language)
 
-  const makeBody = (soundtrack: string) => ({
-    timeline: {
-      soundtrack: { src: soundtrack, effect: 'fadeOut', volume: 0.8 },
+  const makeBody = (soundtrack: string) => {
+    const timeline: Record<string, unknown> = {
       tracks: [{ clips: [{ asset: { type: 'html', html, width: 1080, height: 1920 }, start: 0, length: 30, fit: 'none' }] }],
-    },
-    output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 },
-  })
+    }
+    if (soundtrack) timeline.soundtrack = { src: soundtrack, effect: 'fadeOut', volume: 0.8 }
+    return { timeline, output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 } }
+  }
 
   let res = await fetch(`${BASE}/${STAGE()}/render`, {
     method: 'POST',
@@ -204,11 +206,11 @@ export async function renderShortsVideo(
     body: JSON.stringify(makeBody(soundtrackSrc)),
   })
   if (!res.ok) {
-    console.warn('[Shotstack] TTS 실패, 배경음악으로 재시도')
+    console.warn('[Shotstack] TTS 실패, soundtrack 없이 재시도')
     res = await fetch(`${BASE}/${STAGE()}/render`, {
       method: 'POST',
       headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify(makeBody(BG_MUSIC_URL)),
+      body: JSON.stringify(makeBody('')),
     })
     if (!res.ok) throw new Error(`Shotstack 렌더 요청 실패: ${await res.text()}`)
   }
