@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
+import crypto from 'crypto'
 import { query, queryOne, execute } from '@/lib/db'
 import { deleteYouTubeVideo } from '@/lib/youtube'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
+
+// 임시 진단용 GET — 런타임 CRON_SECRET 의 존재/길이/해시앞12자리만 반환(값 노출 없음).
+// 진단 종료 후 제거 예정.
+export async function GET() {
+  const s = process.env.CRON_SECRET
+  if (!s) return NextResponse.json({ set: false })
+  const trimmed = s.trim()
+  const sha12 = crypto.createHash('sha256').update(trimmed).digest('hex').slice(0, 12).toUpperCase()
+  return NextResponse.json({ set: true, rawLen: s.length, trimLen: trimmed.length, sha12 })
+}
 
 // POST /api/admin/reset-content
 // Authorization: Bearer <CRON_SECRET>
