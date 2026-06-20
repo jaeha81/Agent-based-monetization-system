@@ -157,6 +157,21 @@ export async function patchVideoNotForKids(videoId: string): Promise<void> {
   }
 }
 
+export async function deleteYouTubeVideo(videoId: string): Promise<void> {
+  const accessToken = await refreshAccessToken()
+
+  const res = await fetch(`${YT_API}/videos?id=${encodeURIComponent(videoId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+
+  // 성공 시 204 No Content
+  if (!res.ok && res.status !== 204) {
+    const err = await res.text()
+    throw new Error(`YouTube 영상 삭제 실패 (${videoId}): ${err}`)
+  }
+}
+
 export async function getChannelStats(): Promise<{
   subscriberCount: number
   viewCount: number
