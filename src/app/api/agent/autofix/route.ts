@@ -7,7 +7,7 @@ import { resumeVideoRenderJob } from '@/lib/workflow-engine'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+export const maxDuration = 300
 
 interface AutofixResponse {
   ok: boolean
