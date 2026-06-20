@@ -13,8 +13,9 @@ export const maxDuration = 60
 //  - deleteVideoId 가 있으면 기존 OAuth 토큰으로 YouTube 영상도 삭제 시도.
 //  - content / scheduled_posts 데이터만 UPDATE (스키마 변경 없음).
 export async function POST(req: NextRequest) {
-  const secret = req.headers.get('authorization')?.replace('Bearer ', '')
-  if (!secret || secret !== process.env.CRON_SECRET) {
+  const secret = req.headers.get('authorization')?.replace('Bearer ', '').trim()
+  const expected = (process.env.CRON_SECRET || '').trim()
+  if (!secret || !expected || secret !== expected) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
