@@ -291,7 +291,7 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
           const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
           try {
             const language = post.language || 'ko'
-            const [scenario, imageBase64] = await Promise.all([
+            const [scenario, imageUrl] = await Promise.all([
               generateVideoScenario(
                 post.product_name,
                 post.category || '일반',
@@ -300,12 +300,16 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
                 post.hook || undefined,
                 post.script || undefined,
               ),
-              generateProductImage(buildProductImagePrompt(post.product_name, post.category || '일반')),
+              generateProductImage(
+                buildProductImagePrompt(post.product_name, post.category || '일반'),
+                post.category || '일반',
+                post.product_name,
+              ),
             ])
             const renderId = await submitShotstackScenicRender(
               scenario,
               post.product_name,
-              imageBase64,
+              imageUrl,
               language,
               callbackUrl,
               post.coupang_url || undefined,

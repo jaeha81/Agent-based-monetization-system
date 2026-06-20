@@ -256,8 +256,8 @@ async function nodeVideoRender(
 
   const language = input.language || 'ko'
 
-  // 시나리오 생성 (Gemini) + 제품 이미지 생성 (Stability AI) 병렬
-  const [scenario, imageBase64] = await Promise.all([
+  // 시나리오 생성 (Gemini) + 제품 이미지 생성 (Stability AI → Unsplash 폴백) 병렬
+  const [scenario, imageUrl] = await Promise.all([
     generateVideoScenario(
       content.product_name,
       content.category || '일반',
@@ -266,7 +266,11 @@ async function nodeVideoRender(
       content.hook || undefined,
       content.script || undefined,
     ),
-    generateProductImage(buildProductImagePrompt(content.product_name, content.category || '일반')),
+    generateProductImage(
+      buildProductImagePrompt(content.product_name, content.category || '일반'),
+      content.category || '일반',
+      content.product_name,
+    ),
   ])
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
@@ -275,7 +279,7 @@ async function nodeVideoRender(
   const renderId = await submitShotstackScenicRender(
     scenario,
     content.product_name,
-    imageBase64,
+    imageUrl,
     language,
     callbackUrl,
     content.coupang_url || undefined,
