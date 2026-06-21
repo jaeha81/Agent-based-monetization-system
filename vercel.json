@@ -1,10 +1,6 @@
 {
   "crons": [
     {
-      "path": "/api/cron/daily",
-      "schedule": "0 17 * * *"
-    },
-    {
       "path": "/api/cron/revenue-sync",
       "schedule": "0 21 * * *"
     }
