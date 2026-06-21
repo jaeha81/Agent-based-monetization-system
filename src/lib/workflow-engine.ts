@@ -6,6 +6,9 @@ import { generateVideoScenario } from '@/lib/agents/scenario-agent'
 import { generateProductImage, buildProductImagePrompt } from '@/lib/agents/image-agent'
 import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags } from '@/lib/youtube'
 import { submitVeoJob, buildVeoPrompt, downloadVeoVideo } from '@/lib/agents/veo-agent'
+import { uploadVideoToBlob, deleteBlob } from '@/lib/blob-storage'
+import { postInstagramReel } from '@/lib/instagram'
+import { postTikTokVideo } from '@/lib/tiktok'
 
 // ─── 타입 정의 ───────────────────────────────────────────────────────────────
 
@@ -14,6 +17,8 @@ export type NodeType =
   | 'content_generation'
   | 'video_render'
   | 'youtube_upload'
+  | 'instagram_reel'
+  | 'tiktok_video'
   | 'schedule_post'
   | 'revenue_sync'
   | 'notify'
@@ -27,6 +32,7 @@ export interface JobInput {
   contentId?: number
   renderId?: string
   videoUrl?: string
+  blobUrl?: string
   platform?: string
   market?: string
   language?: string
@@ -37,10 +43,12 @@ export interface JobInput {
 // on:node_complete → 다음 노드 자동 큐잉
 
 const NODE_SUCCESSORS: Partial<Record<NodeType, NodeType[]>> = {
-  product_discovery: ['content_generation'],  // 각 product당 하나 큐
-  content_generation: ['video_render', 'schedule_post'], // YouTube→render, 나머지→schedule
-  video_render: [],           // waiting 상태 → webhook이 youtube_upload 큐
-  youtube_upload: ['revenue_sync', 'notify'],
+  product_discovery: ['content_generation'],
+  content_generation: ['video_render', 'schedule_post'],
+  video_render: [],           // waiting → webhook이 youtube_upload 큐
+  youtube_upload: ['instagram_reel', 'tiktok_video', 'revenue_sync', 'notify'],
+  instagram_reel: [],
+  tiktok_video: [],
   schedule_post: [],
   revenue_sync: [],
   notify: [],
@@ -145,6 +153,8 @@ async function dispatchNode(
     case 'content_generation': return nodeContentGeneration(workflowName, jobId, input, triggerType)
     case 'video_render':       return nodeVideoRender(workflowName, jobId, input, triggerType)
     case 'youtube_upload':     return nodeYouTubeUpload(workflowName, jobId, input)
+    case 'instagram_reel':     return nodeInstagramReel(workflowName, jobId, input)
+    case 'tiktok_video':       return nodeTikTokVideo(workflowName, jobId, input)
     case 'schedule_post':      return nodeSchedulePost(workflowName, jobId, input)
     case 'revenue_sync':       return nodeRevenueSync(workflowName, jobId, input)
     case 'notify':             return nodeNotify(workflowName, jobId, input)
@@ -382,13 +392,41 @@ async function nodeYouTubeUpload(
     [result.videoId, input.contentId]
   )
 
-  await completeJob(jobId, { videoId: result.videoId, url: result.url })
+  // Blob에 영상 업로드 → Instagram/TikTok 공개 URL 확보
+  let blobUrl: string | undefined
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    try {
+      const filename = `${input.contentId}-${Date.now()}.mp4`
+      const { url } = await uploadVideoToBlob(videoBuffer, filename)
+      blobUrl = url
+      console.log(`[Workflow] Blob 업로드 완료: ${blobUrl}`)
+    } catch (e) {
+      console.warn('[Workflow] Blob 업로드 실패 (Instagram/TikTok 스킵):', e instanceof Error ? e.message : String(e))
+    }
+  }
 
-  // 훅 발동: uploaded → revenue_sync + notify 병렬 큐
+  await completeJob(jobId, { videoId: result.videoId, url: result.url, blobUrl })
+
+  // 훅 발동: youtube_uploaded → 워터폴 병렬 큐
+  const waterfallJobs: Promise<void>[] = []
+  const waterfallInput = { contentId: input.contentId, videoUrl: input.videoUrl, blobUrl }
+
+  if (blobUrl && process.env.INSTAGRAM_ACCESS_TOKEN) {
+    const igId = await createJob(workflowName, 'instagram_reel', waterfallInput, 'webhook')
+    waterfallJobs.push(processJob(igId))
+    console.log(`[Workflow] Hook: youtube_uploaded → instagram_reel(${igId}) queued`)
+  }
+  if (blobUrl && process.env.TIKTOK_ACCESS_TOKEN) {
+    const ttId = await createJob(workflowName, 'tiktok_video', waterfallInput, 'webhook')
+    waterfallJobs.push(processJob(ttId))
+    console.log(`[Workflow] Hook: youtube_uploaded → tiktok_video(${ttId}) queued`)
+  }
+
   const r1 = await createJob(workflowName, 'revenue_sync', { contentId: input.contentId }, 'webhook')
   const r2 = await createJob(workflowName, 'notify', { contentId: input.contentId }, 'webhook')
+  waterfallJobs.push(processJob(r1), processJob(r2))
   console.log(`[Workflow] Hook: youtube_uploaded → revenue_sync(${r1}), notify(${r2}) queued`)
-  await Promise.all([processJob(r1), processJob(r2)])
+  await Promise.all(waterfallJobs)
 }
 
 // 비-YouTube 플랫폼 스케줄 등록
@@ -447,6 +485,100 @@ async function nodeNotify(
     await completeJob(jobId, { notified: true })
   } catch {
     await completeJob(jobId, { skipped: true, reason: 'discord_error' })
+  }
+}
+
+// 훅: Instagram Reels 업로드 (Blob 공개 URL 사용)
+async function nodeInstagramReel(
+  _workflowName: string, jobId: number, input: JobInput
+): Promise<void> {
+  if (!input.blobUrl) {
+    await completeJob(jobId, { skipped: true, reason: 'no_blob_url' })
+    return
+  }
+  if (!process.env.INSTAGRAM_ACCESS_TOKEN) {
+    await completeJob(jobId, { skipped: true, reason: 'no_instagram_token' })
+    return
+  }
+
+  const content = await queryOne<{ hook: string | null; script: string | null; product_name: string; coupang_url: string | null }>(
+    `SELECT c.hook, c.script, p.name as product_name, p.coupang_url
+     FROM content c JOIN products p ON c.product_id = p.id WHERE c.id = ?`,
+    [input.contentId]
+  )
+  if (!content) {
+    await completeJob(jobId, { skipped: true, reason: 'content_not_found' })
+    return
+  }
+
+  const affiliateUrl = content.coupang_url || 'https://www.coupang.com'
+  const caption = [
+    content.hook || content.product_name,
+    '',
+    content.script?.slice(0, 200) || '',
+    '',
+    '⚠️ 이 영상은 쿠팡 파트너스 활동으로 수수료를 받을 수 있습니다.',
+    '⚠️ AI(인공지능)로 생성된 콘텐츠입니다.',
+    `🛒 구매링크: ${affiliateUrl}`,
+    '#쇼핑추천 #핫템 #쿠팡 #AI생성',
+  ].join('\n')
+
+  try {
+    const result = await postInstagramReel({ videoUrl: input.blobUrl, caption })
+    await execute(
+      `INSERT OR IGNORE INTO scheduled_posts (content_id, platform, status, published_at) VALUES (?, 'Instagram', 'published', datetime('now'))`,
+      [input.contentId]
+    )
+    await completeJob(jobId, { mediaId: result.mediaId, url: result.url })
+    console.log(`[Workflow] Instagram Reels 업로드 완료: ${result.url}`)
+    // Blob 정리는 TikTok까지 완료 후 별도 처리 (24h 내 자동 만료)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    await completeJob(jobId, { skipped: true, reason: msg })
+    console.warn('[Workflow] Instagram Reels 실패 (건너뜀):', msg)
+  }
+}
+
+// 훅: TikTok 업로드 (Blob 공개 URL 사용)
+async function nodeTikTokVideo(
+  _workflowName: string, jobId: number, input: JobInput
+): Promise<void> {
+  if (!input.blobUrl) {
+    await completeJob(jobId, { skipped: true, reason: 'no_blob_url' })
+    return
+  }
+  if (!process.env.TIKTOK_ACCESS_TOKEN) {
+    await completeJob(jobId, { skipped: true, reason: 'no_tiktok_token' })
+    return
+  }
+
+  const content = await queryOne<{ hook: string | null; product_name: string }>(
+    `SELECT c.hook, p.name as product_name FROM content c JOIN products p ON c.product_id = p.id WHERE c.id = ?`,
+    [input.contentId]
+  )
+  if (!content) {
+    await completeJob(jobId, { skipped: true, reason: 'content_not_found' })
+    return
+  }
+
+  try {
+    const result = await postTikTokVideo({
+      videoUrl: input.blobUrl,
+      title: (content.hook || content.product_name).slice(0, 150),
+      privacyLevel: 'SELF_ONLY',
+    })
+
+    // Blob 삭제 (Instagram/TikTok 모두 완료 후)
+    if (input.blobUrl) {
+      await deleteBlob(input.blobUrl).catch(() => {})
+    }
+
+    await completeJob(jobId, { publishId: result.publishId })
+    console.log(`[Workflow] TikTok 업로드 완료: publishId=${result.publishId}`)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    await completeJob(jobId, { skipped: true, reason: msg })
+    console.warn('[Workflow] TikTok 실패 (건너뜀):', msg)
   }
 }
 
