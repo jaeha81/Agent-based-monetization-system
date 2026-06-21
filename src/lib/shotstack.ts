@@ -6,8 +6,20 @@ const STAGE = () => (process.env.SHOTSTACK_STAGE === 'v1' ? 'v1' : 'stage')
 // BOM 및 공백 제거
 const getShotstackKey = () => process.env.SHOTSTACK_API_KEY?.replace(/^﻿/, '').trim()
 
-// Production에서 접근 불가한 sandbox 전용 에셋 → 음악 없이 처리
-const BG_MUSIC_URL = ''
+// 로열티프리 음악 풀 (Mixkit CDN - 상업용 무료)
+const MUSIC_POOL = [
+  'https://assets.mixkit.co/music/preview/mixkit-tech-house-vibes-130.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-upbeat-funky-141.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-feeling-happy-5.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-games-worldbeat-468.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-fun-n-funky-happy-149.mp3',
+]
+
+function pickMusic(seed: string): string {
+  let sum = 0
+  for (let i = 0; i < seed.length; i++) sum += seed.charCodeAt(i)
+  return MUSIC_POOL[sum % MUSIC_POOL.length]
+}
 
 const BG_GRADIENTS = [
   '#0f0c29,#302b63,#24243e',
@@ -50,10 +62,12 @@ export async function submitShotstackScenicRender(
     ? [{ clips: [{ asset: { type: 'image', src: imageUrl }, start: 7, length: 11, fit: 'cover', opacity: 0.4, effect: 'zoomIn' }] }]
     : []
 
-  // TTS: Google Cloud TTS 키 있으면 사용, 없으면 배경음악
-  const soundtrackSrc = await buildSoundtrackSrc(ttsText, ttsVoice, language)
+  // TTS 나레이션 생성 (Shotstack Ingest API - AWS Polly Seoyeon)
+  const ttsUrl = await generateShotstackTTS(ttsText, ttsVoice)
+  const bgMusic = pickMusic(productName)
 
-  const body = buildRenderBody(scenes, imageTracks, soundtrackSrc, callbackUrl)
+  // TTS 성공: 나레이션(1.0) + 배경음악(0.12) / 실패: 배경음악만(0.8)
+  const body = buildRenderBody(scenes, imageTracks, ttsUrl ?? bgMusic, callbackUrl, ttsUrl ? bgMusic : undefined)
 
   const res = await fetch(`${BASE}/${STAGE()}/render`, {
     method: 'POST',
@@ -63,8 +77,7 @@ export async function submitShotstackScenicRender(
 
   if (!res.ok) {
     const errText = await res.text()
-    console.warn('[Shotstack] 시나리오 렌더 실패, 배경음악으로 재시도:', errText.slice(0, 200))
-    // 4씬 유지하되 배경음악만으로 폴백 (1씬으로 가지 않음)
+    console.warn('[Shotstack] 시나리오 렌더 실패, 배경음악만으로 재시도:', errText.slice(0, 200))
     return submitShotstackScenicRenderWithMusic(scenario, productName, imageUrl, language, callbackUrl, affiliateUrl)
   }
 
@@ -72,7 +85,7 @@ export async function submitShotstackScenicRender(
   return response.id
 }
 
-// 4씬 + 배경음악 (TTS 폴백)
+// 4씬 + 배경음악만 (TTS 실패 폴백)
 async function submitShotstackScenicRenderWithMusic(
   scenario: VideoScenario,
   productName: string,
@@ -91,7 +104,7 @@ async function submitShotstackScenicRenderWithMusic(
     ? [{ clips: [{ asset: { type: 'image', src: imageUrl }, start: 7, length: 11, fit: 'cover', opacity: 0.4, effect: 'zoomIn' }] }]
     : []
 
-  const body = buildRenderBody(scenes, imageTracks, BG_MUSIC_URL, callbackUrl)
+  const body = buildRenderBody(scenes, imageTracks, pickMusic(productName), callbackUrl)
 
   const res = await fetch(`${BASE}/${STAGE()}/render`, {
     method: 'POST',
@@ -107,16 +120,29 @@ async function submitShotstackScenicRenderWithMusic(
 function buildRenderBody(
   scenes: ReturnType<typeof buildAllScenes>,
   imageTracks: object[],
-  soundtrackSrc: string,
+  ttsOrMusicSrc: string,
   callbackUrl?: string,
+  bgMusicSrc?: string,
 ) {
+  // TTS가 있으면 나레이션 트랙(볼륨 1.0) + 배경음악(볼륨 0.12) 분리
+  // TTS 없으면 음악만 사운드트랙(볼륨 0.8)
+  const hasTTS = ttsOrMusicSrc.startsWith('http') && bgMusicSrc
+
+  const narrationTrack = hasTTS
+    ? [{ clips: [{ asset: { type: 'audio', src: ttsOrMusicSrc, volume: 1.0 }, start: 0, length: 30 }] }]
+    : []
+
   const timeline: Record<string, unknown> = {
     tracks: [
+      ...narrationTrack,
       ...imageTracks,
       { clips: scenes },
     ],
   }
-  if (soundtrackSrc) timeline.soundtrack = { src: soundtrackSrc, effect: 'fadeOut', volume: 0.8 }
+
+  const musicSrc = hasTTS ? bgMusicSrc! : ttsOrMusicSrc
+  if (musicSrc) timeline.soundtrack = { src: musicSrc, effect: 'fadeOut', volume: hasTTS ? 0.12 : 0.8 }
+
   const body: Record<string, unknown> = {
     timeline,
     output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 },
@@ -142,16 +168,19 @@ export async function submitShotstackRender(
 
   const ttsText = script ? script.slice(0, 500) : `${hook}. ${productName}. 구매 링크는 설명란에 있습니다.`
   const ttsVoice = language === 'ko' ? 'Seoyeon' : language === 'ja' ? 'Mizuki' : 'Amy'
-  const soundtrackSrc = await buildSoundtrackSrc(ttsText, ttsVoice, language)
+  const ttsUrl = await generateShotstackTTS(ttsText, ttsVoice)
+  const bgMusic = pickMusic(hook)
 
-  const timeline: Record<string, unknown> = {
-    tracks: [{ clips: [{ asset: { type: 'html', html, width: 1080, height: 1920 }, start: 0, length: 30, fit: 'none' }] }],
+  const makeTimeline = (tts: string | null, music: string) => {
+    const tracks: unknown[] = []
+    if (tts) tracks.push({ clips: [{ asset: { type: 'audio', src: tts, volume: 1.0 }, start: 0, length: 30 }] })
+    tracks.push({ clips: [{ asset: { type: 'html', html, width: 1080, height: 1920 }, start: 0, length: 30, fit: 'none' }] })
+    const timeline: Record<string, unknown> = { tracks }
+    if (music) timeline.soundtrack = { src: music, effect: 'fadeOut', volume: tts ? 0.12 : 0.8 }
+    return { timeline, output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 } }
   }
-  if (soundtrackSrc) timeline.soundtrack = { src: soundtrackSrc, effect: 'fadeOut', volume: 0.8 }
-  const body: Record<string, unknown> = {
-    timeline,
-    output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 },
-  }
+
+  const body: Record<string, unknown> = { ...makeTimeline(ttsUrl, bgMusic) }
   if (callbackUrl) body.callback = callbackUrl
 
   let res = await fetch(`${BASE}/${STAGE()}/render`, {
@@ -161,12 +190,13 @@ export async function submitShotstackRender(
   })
 
   if (!res.ok) {
-    // soundtrack 없이 재시도
-    delete (body.timeline as Record<string, unknown>).soundtrack
+    // TTS 없이 배경음악만으로 재시도
+    const fallback = { ...makeTimeline(null, bgMusic) }
+    if (callbackUrl) (fallback as Record<string, unknown>).callback = callbackUrl
     res = await fetch(`${BASE}/${STAGE()}/render`, {
       method: 'POST',
       headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(fallback),
     })
     if (!res.ok) throw new Error(`Shotstack 제출 실패: ${await res.text()}`)
   }
@@ -190,27 +220,29 @@ export async function renderShortsVideo(
   const html = buildSimpleHtml(hook.slice(0, 40), productName, language, bg, affiliateUrl)
   const ttsText = script ? script.slice(0, 500) : `${hook}. ${productName}. 구매 링크는 설명란에 있습니다.`
   const ttsVoice = language === 'ko' ? 'Seoyeon' : language === 'ja' ? 'Mizuki' : 'Amy'
-  const soundtrackSrc = await buildSoundtrackSrc(ttsText, ttsVoice, language)
+  const ttsUrl = await generateShotstackTTS(ttsText, ttsVoice)
+  const bgMusic = pickMusic(hook)
 
-  const makeBody = (soundtrack: string) => {
-    const timeline: Record<string, unknown> = {
-      tracks: [{ clips: [{ asset: { type: 'html', html, width: 1080, height: 1920 }, start: 0, length: 30, fit: 'none' }] }],
-    }
-    if (soundtrack) timeline.soundtrack = { src: soundtrack, effect: 'fadeOut', volume: 0.8 }
+  const makeBody = (tts: string | null, music: string) => {
+    const tracks: unknown[] = []
+    if (tts) tracks.push({ clips: [{ asset: { type: 'audio', src: tts, volume: 1.0 }, start: 0, length: 30 }] })
+    tracks.push({ clips: [{ asset: { type: 'html', html, width: 1080, height: 1920 }, start: 0, length: 30, fit: 'none' }] })
+    const timeline: Record<string, unknown> = { tracks }
+    if (music) timeline.soundtrack = { src: music, effect: 'fadeOut', volume: tts ? 0.12 : 0.8 }
     return { timeline, output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 } }
   }
 
   let res = await fetch(`${BASE}/${STAGE()}/render`, {
     method: 'POST',
     headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
-    body: JSON.stringify(makeBody(soundtrackSrc)),
+    body: JSON.stringify(makeBody(ttsUrl, bgMusic)),
   })
   if (!res.ok) {
-    console.warn('[Shotstack] TTS 실패, soundtrack 없이 재시도')
+    // TTS 없이 배경음악만으로 재시도
     res = await fetch(`${BASE}/${STAGE()}/render`, {
       method: 'POST',
       headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify(makeBody('')),
+      body: JSON.stringify(makeBody(null, bgMusic)),
     })
     if (!res.ok) throw new Error(`Shotstack 렌더 요청 실패: ${await res.text()}`)
   }
@@ -228,35 +260,48 @@ export async function renderShortsVideo(
   throw new Error('Shotstack 렌더 타임아웃 (5분)')
 }
 
-// ─── TTS 음원 URL 빌드 ────────────────────────────────────────────────────────
-async function buildSoundtrackSrc(text: string, voice: string, language: string): Promise<string> {
-  // Google Cloud TTS (키 있을 때만)
-  const googleKey = process.env.GOOGLE_TTS_API_KEY?.replace(/^﻿/, '').trim()
-  if (googleKey) {
-    try {
-      const langCode = language === 'ko' ? 'ko-KR' : language === 'ja' ? 'ja-JP' : 'en-US'
-      const ttsRes = await fetch(
-        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${googleKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            input: { text: text.slice(0, 500) },
-            voice: { languageCode: langCode, name: voice === 'Seoyeon' ? 'ko-KR-Wavenet-A' : voice === 'Mizuki' ? 'ja-JP-Wavenet-A' : 'en-US-Wavenet-F' },
-            audioConfig: { audioEncoding: 'MP3', speakingRate: 0.95 },
-          }),
-        }
-      )
-      if (ttsRes.ok) {
-        const { audioContent } = await ttsRes.json() as { audioContent: string }
-        // Google TTS는 base64 MP3 반환 — data URI로 Shotstack에 전달
-        return `data:audio/mp3;base64,${audioContent}`
-      }
-    } catch { /* 폴백 */ }
-  }
+// ─── Shotstack Ingest API로 한국어 TTS 생성 (AWS Polly Seoyeon) ────────────────
+async function generateShotstackTTS(text: string, voice: string = 'Seoyeon'): Promise<string | null> {
+  const key = getShotstackKey()
+  if (!key) return null
+  const stage = STAGE()
+  try {
+    const ttsUrl = `shotstack://tts?voice=${voice}&text=${encodeURIComponent(text.slice(0, 500))}`
+    const submitRes = await fetch(`https://api.shotstack.io/ingest/${stage}/sources`, {
+      method: 'POST',
+      headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: ttsUrl }),
+    })
+    if (!submitRes.ok) return null
+    const submitData = await submitRes.json() as { data?: { id: string } }
+    const sourceId = submitData.data?.id
+    if (!sourceId) return null
 
-  // 배경음악 폴백 (항상 사용 가능)
-  return BG_MUSIC_URL
+    // 최대 30초 폴링 (2초 간격 × 15회)
+    for (let i = 0; i < 15; i++) {
+      await new Promise(r => setTimeout(r, 2000))
+      const pollRes = await fetch(`https://api.shotstack.io/ingest/${stage}/sources/${sourceId}`, {
+        headers: { 'x-api-key': key },
+      })
+      const pollData = await pollRes.json() as { data?: { attributes?: { status: string; url?: string } } }
+      const attr = pollData.data?.attributes
+      if (attr?.status === 'ready' && attr.url) return attr.url
+      if (attr?.status === 'failed') return null
+    }
+  } catch { /* TTS 미지원 환경 */ }
+  return null
+}
+
+// ─── 음원 URL 빌드: TTS 나레이션 → 로열티프리 음악 폴백 ────────────────────────
+// ⚠️ Google TTS는 base64 data URI 반환 → Shotstack src로 사용 불가 → 제거
+async function buildSoundtrackSrc(text: string, voice: string, language: string): Promise<string> {
+  // 1순위: Shotstack Ingest TTS (AWS Polly - 실제 한국어 음성)
+  const voiceName = language === 'ko' ? 'Seoyeon' : language === 'ja' ? 'Mizuki' : voice
+  const ttsUrl = await generateShotstackTTS(text, voiceName)
+  if (ttsUrl) return ttsUrl
+
+  // 2순위: 로열티프리 배경음악 (항상 작동)
+  return pickMusic(text.slice(0, 10))
 }
 
 // ─── 씬 HTML 빌더 ─────────────────────────────────────────────────────────────
