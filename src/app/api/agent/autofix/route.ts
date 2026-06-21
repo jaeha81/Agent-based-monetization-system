@@ -106,7 +106,7 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
     let renderResumed = 0
     try {
       const waitingJobs = await query<{ id: number; render_id: string }>(
-        `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL LIMIT 10`
+        `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL ORDER BY id DESC LIMIT 10`
       )
 
       if (waitingJobs.length > 0) {
@@ -146,10 +146,10 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
                 log.push(`  ✓ [Shotstack] ${job.render_id.slice(0, 20)}... 완료 → youtube_upload 트리거`)
               } else if (poll.status === 'failed') {
                 await execute(
-                  `UPDATE workflow_jobs SET status = 'failed', error = 'Shotstack render failed' WHERE id = ?`,
-                  [job.id]
+                  `UPDATE workflow_jobs SET status = 'failed', error = ? WHERE id = ?`,
+                  [`Shotstack: ${poll.error || 'render failed (no detail)'}`, job.id]
                 )
-                log.push(`  ✕ [Shotstack] ${job.render_id.slice(0, 20)}... 실패`)
+                log.push(`  ✕ [Shotstack] ${job.render_id.slice(0, 20)}... 실패: ${(poll.error || '사유 미상').slice(0, 80)}`)
               } else {
                 log.push(`  ⏳ [Shotstack] ${job.render_id.slice(0, 20)}... 진행 중 (${poll.status})`)
               }
@@ -255,7 +255,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const shotstackKeyValid = await validateShotstackKey()
     const waitingJobs = await query<{ id: number; render_id: string }>(
-      `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL LIMIT 10`
+      `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL ORDER BY id DESC LIMIT 10`
     )
     for (const job of waitingJobs) {
       try {
@@ -274,7 +274,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             await resumeVideoRenderJob(job.render_id, poll.url)
             renderResumed++
           } else if (poll.status === 'failed') {
-            await execute(`UPDATE workflow_jobs SET status = 'failed', error = 'Shotstack render failed' WHERE id = ?`, [job.id])
+            await execute(`UPDATE workflow_jobs SET status = 'failed', error = ? WHERE id = ?`, [`Shotstack: ${poll.error || 'render failed (no detail)'}`, job.id])
           }
         }
       } catch { /* 개별 폴링 오류 무시 */ }
