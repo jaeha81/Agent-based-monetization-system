@@ -7,7 +7,7 @@
     {
       "path": "/api/cron/revenue-sync",
       "schedule": "0 21 * * *"
-    },
+    }
   ],
   "functions": {
     "src/app/api/**": {
