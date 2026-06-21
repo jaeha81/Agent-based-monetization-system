@@ -57,8 +57,10 @@ export async function submitShotstackScenicRender(
   const ttsText = (scenario.ttsScript || `${scenario.hook}. ${productName}.`).slice(0, 500)
   const ttsVoice = language === 'ko' ? 'Seoyeon' : language === 'ja' ? 'Mizuki' : 'Amy'
 
-  const imageTracks = imageUrl
-    ? [{ clips: [{ asset: { type: 'image', src: imageUrl }, start: 7, length: 11, fit: 'cover', opacity: 0.4, effect: 'zoomIn' }] }]
+  // data: URI는 Shotstack이 다운로드 불가 → https:// URL만 허용
+  const safeImageUrl = imageUrl?.startsWith('https://') ? imageUrl : null
+  const imageTracks = safeImageUrl
+    ? [{ clips: [{ asset: { type: 'image', src: safeImageUrl }, start: 7, length: 11, fit: 'cover', opacity: 0.4, effect: 'zoomIn' }] }]
     : []
 
   // TTS 나레이션 생성 (Shotstack Ingest API - AWS Polly Seoyeon)
@@ -99,8 +101,9 @@ async function submitShotstackScenicRenderWithMusic(
   const [bgFrom, bgTo] = bg.split(',').slice(0, 2)
 
   const scenes = buildAllScenes(scenario, productName, bgFrom, bgTo, affiliateUrl)
-  const imageTracks = imageUrl
-    ? [{ clips: [{ asset: { type: 'image', src: imageUrl }, start: 7, length: 11, fit: 'cover', opacity: 0.4, effect: 'zoomIn' }] }]
+  const safeImageUrl2 = imageUrl?.startsWith('https://') ? imageUrl : null
+  const imageTracks = safeImageUrl2
+    ? [{ clips: [{ asset: { type: 'image', src: safeImageUrl2 }, start: 7, length: 11, fit: 'cover', opacity: 0.4, effect: 'zoomIn' }] }]
     : []
 
   const body = buildRenderBody(scenes, imageTracks, pickMusic(productName), callbackUrl)
