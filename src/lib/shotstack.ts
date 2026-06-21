@@ -6,13 +6,12 @@ const STAGE = () => (process.env.SHOTSTACK_STAGE === 'v1' ? 'v1' : 'stage')
 // BOM 및 공백 제거
 const getShotstackKey = () => process.env.SHOTSTACK_API_KEY?.replace(/^﻿/, '').trim()
 
-// 로열티프리 음악 풀 (Mixkit CDN - 상업용 무료)
+// 로열티프리 음악 풀 (Incompetech/Kevin MacLeod — CC BY 3.0, 직접 접근 확인)
 const MUSIC_POOL = [
-  'https://assets.mixkit.co/music/preview/mixkit-tech-house-vibes-130.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-upbeat-funky-141.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-feeling-happy-5.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-games-worldbeat-468.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-fun-n-funky-happy-149.mp3',
+  'https://incompetech.com/music/royalty-free/mp3-royaltyfree/Americana.mp3',
+  'https://incompetech.com/music/royalty-free/mp3-royaltyfree/Beach%20Party.mp3',
+  'https://incompetech.com/music/royalty-free/mp3-royaltyfree/Bright%20Wish.mp3',
+  'https://incompetech.com/music/royalty-free/mp3-royaltyfree/Cool%20Vibes.mp3',
 ]
 
 function pickMusic(seed: string): string {
@@ -260,36 +259,13 @@ export async function renderShortsVideo(
   throw new Error('Shotstack 렌더 타임아웃 (5분)')
 }
 
-// ─── Shotstack Ingest API로 한국어 TTS 생성 (AWS Polly Seoyeon) ────────────────
-async function generateShotstackTTS(text: string, voice: string = 'Seoyeon'): Promise<string | null> {
-  const key = getShotstackKey()
-  if (!key) return null
-  const stage = STAGE()
-  try {
-    const ttsUrl = `shotstack://tts?voice=${voice}&text=${encodeURIComponent(text.slice(0, 500))}`
-    const submitRes = await fetch(`https://api.shotstack.io/ingest/${stage}/sources`, {
-      method: 'POST',
-      headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: ttsUrl }),
-    })
-    if (!submitRes.ok) return null
-    const submitData = await submitRes.json() as { data?: { id: string } }
-    const sourceId = submitData.data?.id
-    if (!sourceId) return null
-
-    // 최대 30초 폴링 (2초 간격 × 15회)
-    for (let i = 0; i < 15; i++) {
-      await new Promise(r => setTimeout(r, 2000))
-      const pollRes = await fetch(`https://api.shotstack.io/ingest/${stage}/sources/${sourceId}`, {
-        headers: { 'x-api-key': key },
-      })
-      const pollData = await pollRes.json() as { data?: { attributes?: { status: string; url?: string } } }
-      const attr = pollData.data?.attributes
-      if (attr?.status === 'ready' && attr.url) return attr.url
-      if (attr?.status === 'failed') return null
-    }
-  } catch { /* TTS 미지원 환경 */ }
-  return null
+// ─── Vercel TTS 프록시 URL 생성 (Shotstack이 직접 다운로드) ────────────────────
+// GOOGLE_TTS_API_KEY 설정 시 한국어 음성 반환, 미설정 시 null → 음악만 사용
+function generateShotstackTTS(text: string, voice: string = 'Seoyeon'): string | null {
+  if (!process.env.GOOGLE_TTS_API_KEY) return null
+  const lang = voice === 'Seoyeon' ? 'ko' : voice === 'Mizuki' ? 'ja' : 'en'
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
+  return `${baseUrl}/api/tts?text=${encodeURIComponent(text.slice(0, 500))}&lang=${lang}`
 }
 
 // ─── 음원 URL 빌드: TTS 나레이션 → 로열티프리 음악 폴백 ────────────────────────
