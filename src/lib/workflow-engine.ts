@@ -348,6 +348,17 @@ async function nodeYouTubeUpload(
 ): Promise<void> {
   if (!input.contentId || !input.videoUrl) throw new Error('contentId and videoUrl required')
 
+  // 이미 posted 상태면 중복 업로드 방지
+  const currentStatus = await queryOne<{ status: string }>(
+    'SELECT status FROM content WHERE id = ?',
+    [input.contentId]
+  )
+  if (currentStatus?.status === 'posted') {
+    await completeJob(jobId, { skipped: true, reason: 'already_posted', contentId: input.contentId })
+    console.log(`[Workflow] youtube_upload skipped: content ${input.contentId} already posted`)
+    return
+  }
+
   const content = await queryOne<{
     id: number; hook: string | null; script: string | null
     product_name: string; category: string; coupang_url: string | null
