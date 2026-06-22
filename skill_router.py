@@ -292,7 +292,16 @@ def _run_full_pipeline(params: dict) -> dict:
         size_mb = Path(mp4_path).stat().st_size / 1024 / 1024
         _send_discord_status(config.SHORTS_WEBHOOK_URL, f"📤 YouTube 업로드 중... ({size_mb:.1f}MB)")
         from skills.youtube_upload import run as yu_run
+        import time as _time
         yu = yu_run(int(youtube_content_id), mp4_path)
+        # C2: 업로드 실패 시 30초 후 1회 재시도
+        if not yu.get("ok"):
+            err = yu.get("error", "")
+            # 쿼터 초과(uploadLimitExceeded)는 재시도해도 소용없음
+            if "uploadLimitExceeded" not in err and "quotaExceeded" not in err:
+                _send_discord_status(config.SHORTS_WEBHOOK_URL, f"⚠️ 업로드 실패 ({err[:80]}), 30초 후 재시도...")
+                _time.sleep(30)
+                yu = yu_run(int(youtube_content_id), mp4_path)
         results["youtube_pipeline"] = yu
         if yu.get("ok"):
             _send_discord_status(

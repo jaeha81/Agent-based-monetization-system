@@ -1156,7 +1156,11 @@ def make_video(content_id: int) -> dict:
         if bgm_path:
             try:
                 from moviepy import CompositeAudioClip  # moviepy 2.x 공개 경로
-                bgm_clip = AudioFileClip(bgm_path).subclipped(0, TOTAL_DURATION)
+                _bgm_raw = AudioFileClip(bgm_path)
+                _bgm_dur = _bgm_raw.duration or 0
+                # BGM이 영상보다 짧으면 자르지 않음 (subclipped 범위 초과 방지)
+                _clip_end = min(TOTAL_DURATION, _bgm_dur) if _bgm_dur > 0 else TOTAL_DURATION
+                bgm_clip = _bgm_raw.subclipped(0, _clip_end) if _bgm_dur > 0 else _bgm_raw
                 bgm_clip = bgm_clip.with_volume_scaled(0.12)
                 if final_video.audio is not None:
                     mixed = CompositeAudioClip([final_video.audio, bgm_clip])

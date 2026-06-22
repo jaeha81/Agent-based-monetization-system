@@ -53,15 +53,15 @@ def _pipeline(statements: list[dict]) -> list[dict]:
         raise RuntimeError(f"Turso HTTP {e.code}: {body}") from e
 
 
-def execute(sql: str, args: list = []) -> dict:
+def execute(sql: str, args: list | None = None) -> dict:
     """단일 INSERT/UPDATE/DELETE 실행. lastInsertRowid 등 반환."""
-    results = _pipeline([{"sql": sql, "args": args}])
+    results = _pipeline([{"sql": sql, "args": args or []}])
     return results[0].get("response", {}).get("result", {})
 
 
-def query(sql: str, args: list = []) -> list[dict[str, Any]]:
+def query(sql: str, args: list | None = None) -> list[dict[str, Any]]:
     """SELECT 결과를 dict 리스트로 반환."""
-    results = _pipeline([{"sql": sql, "args": args}])
+    results = _pipeline([{"sql": sql, "args": args or []}])
     result = results[0].get("response", {}).get("result", {})
     cols = [c["name"] for c in result.get("cols", [])]
     rows = []
@@ -70,6 +70,6 @@ def query(sql: str, args: list = []) -> list[dict[str, Any]]:
     return rows
 
 
-def query_one(sql: str, args: list = []) -> dict[str, Any] | None:
+def query_one(sql: str, args: list | None = None) -> dict[str, Any] | None:
     rows = query(sql, args)
     return rows[0] if rows else None

@@ -66,6 +66,11 @@ BGM_PATH  = os.getenv("BGM_PATH", str(_HERE / "assets" / "bgm.mp3"))
 UPLOAD_SECRET   = os.getenv("UPLOAD_SECRET", "")
 VERCEL_APP_URL  = os.getenv("VERCEL_APP_URL", "https://shorts-dashboard-one.vercel.app")
 
+# ── YouTube OAuth (로컬 직접 업로드용) ───────────────────────────────────────
+YOUTUBE_CLIENT_ID     = os.getenv("YOUTUBE_CLIENT_ID", "")
+YOUTUBE_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET", "")
+YOUTUBE_REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN", "")
+
 # ── Coupang ───────────────────────────────────────────────────────────────────
 COUPANG_CHANNEL_ID = os.getenv("COUPANG_CHANNEL_ID", "AF5520196")
 
