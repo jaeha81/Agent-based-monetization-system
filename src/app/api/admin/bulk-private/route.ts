@@ -1,5 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { refreshAccessToken } from '@/lib/youtube'
+
+async function getAccessToken(): Promise<string> {
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: (process.env.YOUTUBE_CLIENT_ID || '').replace(/^﻿/, '').trim(),
+      client_secret: (process.env.YOUTUBE_CLIENT_SECRET || '').replace(/^﻿/, '').trim(),
+      refresh_token: (process.env.YOUTUBE_REFRESH_TOKEN || '').replace(/^﻿/, '').trim(),
+      grant_type: 'refresh_token',
+    }),
+  })
+  if (!res.ok) throw new Error(`Token refresh 실패: ${await res.text()}`)
+  const data = await res.json()
+  return String(data.access_token || '')
+}
 
 export const runtime = 'nodejs'
 export const maxDuration = 120
@@ -36,7 +51,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'videoIds 배열 필요' }, { status: 400 })
   }
 
-  const accessToken = await refreshAccessToken()
+  const accessToken = await getAccessToken()
   const results = await Promise.all(videoIds.map(id => setVideoPrivate(id, accessToken)))
   const succeeded = results.filter(r => r.ok).length
   const failed = results.filter(r => !r.ok)

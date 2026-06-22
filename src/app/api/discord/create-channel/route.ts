@@ -65,6 +65,9 @@ export async function POST(req: NextRequest) {
     })
     channelCreated = true
   }
+  if (!channel) {
+    return NextResponse.json({ ok: false, error: '채널 생성 실패' }, { status: 500 })
+  }
 
   // 채널 웹훅 생성 (항상 새로 생성 — 이전 웹훅 덮어쓰기 방지를 위해 기존 목록 확인)
   const existingWebhooks: DiscordWebhook[] = await botFetch(`/channels/${channel.id}/webhooks`)

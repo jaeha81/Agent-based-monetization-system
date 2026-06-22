@@ -518,7 +518,7 @@ async function nodeInstagramReel(
   const content = await queryOne<{ hook: string | null; script: string | null; product_name: string; coupang_url: string | null }>(
     `SELECT c.hook, c.script, p.name as product_name, p.coupang_url
      FROM content c JOIN products p ON c.product_id = p.id WHERE c.id = ?`,
-    [input.contentId]
+    [input.contentId ?? 0]
   )
   if (!content) {
     await completeJob(jobId, { skipped: true, reason: 'content_not_found' })
@@ -541,7 +541,7 @@ async function nodeInstagramReel(
     const result = await postInstagramReel({ videoUrl: input.blobUrl, caption })
     await execute(
       `INSERT OR IGNORE INTO scheduled_posts (content_id, platform, status, published_at) VALUES (?, 'Instagram', 'published', datetime('now'))`,
-      [input.contentId]
+      [input.contentId ?? 0]
     )
     await completeJob(jobId, { mediaId: result.mediaId, url: result.url })
     console.log(`[Workflow] Instagram Reels 업로드 완료: ${result.url}`)
@@ -568,7 +568,7 @@ async function nodeTikTokVideo(
 
   const content = await queryOne<{ hook: string | null; product_name: string }>(
     `SELECT c.hook, p.name as product_name FROM content c JOIN products p ON c.product_id = p.id WHERE c.id = ?`,
-    [input.contentId]
+    [input.contentId ?? 0]
   )
   if (!content) {
     await completeJob(jobId, { skipped: true, reason: 'content_not_found' })

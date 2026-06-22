@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { runBrainScan, getActiveProblems, resolveAndFix } from '@/lib/agent-brain'
 import { queryOne, execute, query } from '@/lib/db'
 import { pollShotstackRender } from '@/lib/shotstack'

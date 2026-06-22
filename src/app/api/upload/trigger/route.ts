@@ -84,6 +84,9 @@ export async function POST(req: NextRequest) {
       cta: '지금 바로 구매하기',
       ttsScript: content.script?.slice(0, 250) || `${content.hook || productName}. 지금 쿠팡에서 최저가로 확인하세요.`,
       imagePrompt: content.image_prompt || buildProductImagePrompt(productName, category),
+      scenes: [],
+      youtubeDescription: `${content.hook || productName}\n\n✅ 지금 최저가 확인 👇\n${affiliateUrl}\n\n⏰ 오늘만 이 가격!\n\n※ 쿠팡 파트너스 활동으로 수수료를 받을 수 있습니다.`,
+      pinnedComment: affiliateUrl ? `🛒 최저가 구매 링크: ${affiliateUrl}` : '',
     }
 
     let renderId: string
