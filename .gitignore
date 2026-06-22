@@ -1,0 +1,10 @@
+.env
+.env.*
+__pycache__/
+*.pyc
+renders/
+logs/
+assets/bgm/
+*.mp4
+*.mp3
+*_qa/
