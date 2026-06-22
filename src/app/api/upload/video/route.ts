@@ -80,7 +80,11 @@ export async function POST(req: NextRequest) {
       [result.videoId, contentId]
     )
 
-    await postTopComment(result.videoId, `🔥 최저가 링크 → ${affiliateUrl}`)
+    try {
+      await postTopComment(result.videoId, `🔥 최저가 링크 → ${affiliateUrl}`)
+    } catch (commentErr) {
+      console.warn('[VeoUpload] 댓글 실패 (무시):', commentErr instanceof Error ? commentErr.message : commentErr)
+    }
 
     console.log(`[VeoUpload] 업로드 완료: contentId=${contentId} videoId=${result.videoId}`)
 
