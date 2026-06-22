@@ -14,11 +14,13 @@ import {
   Settings,
   Cpu,
   BarChart2,
+  GitBranch,
 } from 'lucide-react'
 
 const NAV = [
   { href: '/', label: '대시보드', icon: LayoutDashboard },
   { href: '/agents', label: '에이전트 현황', icon: Cpu, highlight: true },
+  { href: '/pipeline', label: '파이프라인', icon: GitBranch },
   { href: '/automation', label: '자동화 제어', icon: Bot },
   { href: '/revenue-structure', label: '수익 구조', icon: BarChart2 },
   { href: '/products', label: '제품 발굴', icon: Search },
