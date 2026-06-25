@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { startWorkflow } from '@/lib/workflow-engine'
+import { startWorkflow, pollWaitingVideoRenders } from '@/lib/workflow-engine'
 import { runBrainScan } from '@/lib/agent-brain'
 
 export const runtime = 'nodejs'
@@ -19,6 +19,10 @@ export async function GET(req: NextRequest) {
   const started = Date.now()
 
   try {
+    // 0. 이전 run에서 waiting 상태로 남은 렌더 잡 정리 (어제 미완료 건)
+    const prevResumed = await pollWaitingVideoRenders(10).catch(() => 0)
+    if (prevResumed > 0) console.log(`[Cron/Daily] 이전 waiting 렌더 ${prevResumed}건 업로드 트리거됨`)
+
     // 1. 파이프라인 실행
     const result = await startWorkflow('daily_pipeline', 'cron')
 

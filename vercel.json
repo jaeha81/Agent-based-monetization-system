@@ -7,10 +7,6 @@
     {
       "path": "/api/cron/revenue-sync",
       "schedule": "0 21 * * *"
-    },
-    {
-      "path": "/api/agent/autofix",
-      "schedule": "*/10 * * * *"
     }
   ],
   "functions": {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query, execute } from '@/lib/db'
 import { getVideoStats } from '@/lib/youtube'
+import { pollWaitingVideoRenders } from '@/lib/workflow-engine'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -15,8 +16,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // 17:00 daily cron에서 제출된 Veo/Shotstack 렌더가 완료됐는지 폴링 → youtube_upload 트리거
+  const renderResumed = await pollWaitingVideoRenders(20).catch(e => {
+    console.error('[revenue-sync] 렌더 폴링 오류:', e instanceof Error ? e.message : String(e))
+    return 0
+  })
+  console.log(`[revenue-sync] 렌더 폴링 완료: ${renderResumed}건 업로드 트리거됨`)
+
   if (!process.env.YOUTUBE_CLIENT_ID || !process.env.YOUTUBE_REFRESH_TOKEN) {
-    return NextResponse.json({ ok: true, message: 'YouTube 자격증명 미설정', updated: 0 })
+    return NextResponse.json({ ok: true, message: 'YouTube 자격증명 미설정', updated: 0, renderResumed })
   }
 
   // YouTube에 실제 업로드된 콘텐츠의 조회수 가져오기
@@ -53,5 +61,6 @@ export async function GET(req: NextRequest) {
     ok: true,
     message: `YouTube 실제 조회수 ${updated}개 업데이트 완료. 쿠팡 수수료는 partners.coupang.com에서 확인하세요.`,
     updated,
+    renderResumed,
   })
 }

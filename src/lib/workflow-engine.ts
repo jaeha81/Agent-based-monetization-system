@@ -1,11 +1,11 @@
 import { query, queryOne, execute } from '@/lib/db'
 import { searchTrendingProducts, generateAffiliateLink } from '@/lib/coupang'
 import { runContentAgent } from '@/lib/agents/content-agent'
-import { submitShotstackScenicRender } from '@/lib/shotstack'
+import { submitShotstackScenicRender, pollShotstackRender } from '@/lib/shotstack'
 import { generateVideoScenario } from '@/lib/agents/scenario-agent'
 import { generateProductImage, buildProductImagePrompt } from '@/lib/agents/image-agent'
 import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags, postTopComment } from '@/lib/youtube'
-import { submitVeoJob, buildVeoPrompt, downloadVeoVideo } from '@/lib/agents/veo-agent'
+import { submitVeoJob, buildVeoPrompt, downloadVeoVideo, pollVeoJob, isVeoRender } from '@/lib/agents/veo-agent'
 import { uploadVideoToBlob, deleteBlob } from '@/lib/blob-storage'
 import { postInstagramReel } from '@/lib/instagram'
 import { postTikTokVideo } from '@/lib/tiktok'
@@ -618,6 +618,52 @@ export async function startWorkflow(
   await processPendingJobs(workflowName, 10)
 
   return { rootJobId, message: `워크플로우 "${workflowName}" 시작됨 (rootJob: ${rootJobId})` }
+}
+
+// ─── 렌더 폴링 (크론에서 호출 — Veo/Shotstack waiting 잡 확인 후 youtube_upload 트리거) ──────
+
+export async function pollWaitingVideoRenders(limit = 10): Promise<number> {
+  const waitingJobs = await query<{ id: number; render_id: string }>(
+    `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL LIMIT ?`,
+    [limit]
+  )
+  if (waitingJobs.length === 0) return 0
+
+  let resumed = 0
+  for (const job of waitingJobs) {
+    try {
+      if (isVeoRender(job.render_id)) {
+        if (!process.env.GEMINI_API_KEY) continue
+        const poll = await pollVeoJob(job.render_id)
+        if (poll.status === 'done' && poll.videoUri) {
+          await resumeVideoRenderJob(job.render_id, poll.videoUri)
+          resumed++
+          console.log(`[Workflow] pollWaiting: Veo 완료 → youtube_upload 트리거 (${job.render_id.slice(4, 30)}...)`)
+        } else if (poll.status === 'failed') {
+          await execute(
+            `UPDATE workflow_jobs SET status = 'failed', error = ? WHERE id = ?`,
+            [poll.error || 'Veo render failed', job.id]
+          )
+        }
+      } else {
+        if (!process.env.SHOTSTACK_API_KEY) continue
+        const poll = await pollShotstackRender(job.render_id)
+        if (poll.status === 'done' && poll.url) {
+          await resumeVideoRenderJob(job.render_id, poll.url)
+          resumed++
+          console.log(`[Workflow] pollWaiting: Shotstack 완료 → youtube_upload 트리거 (${job.render_id.slice(0, 20)}...)`)
+        } else if (poll.status === 'failed') {
+          await execute(
+            `UPDATE workflow_jobs SET status = 'failed', error = 'Shotstack render failed' WHERE id = ?`,
+            [job.id]
+          )
+        }
+      }
+    } catch (e) {
+      console.warn(`[Workflow] pollWaiting 오류 (${job.render_id.slice(0, 20)}):`, e instanceof Error ? e.message : String(e))
+    }
+  }
+  return resumed
 }
 
 // ─── 상태 조회 ───────────────────────────────────────────────────────────────
