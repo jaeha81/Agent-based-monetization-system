@@ -4,7 +4,7 @@ import { runContentAgent } from '@/lib/agents/content-agent'
 import { submitShotstackScenicRender } from '@/lib/shotstack'
 import { generateVideoScenario } from '@/lib/agents/scenario-agent'
 import { generateProductImage, buildProductImagePrompt } from '@/lib/agents/image-agent'
-import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags } from '@/lib/youtube'
+import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags, postTopComment } from '@/lib/youtube'
 import { submitVeoJob, buildVeoPrompt, downloadVeoVideo } from '@/lib/agents/veo-agent'
 import { uploadVideoToBlob, deleteBlob } from '@/lib/blob-storage'
 import { postInstagramReel } from '@/lib/instagram'
@@ -406,6 +406,16 @@ async function nodeYouTubeUpload(
   }
 
   await completeJob(jobId, { videoId: result.videoId, url: result.url, blobUrl })
+
+  // 고정 댓글: 쇼츠 설명란 URL은 클릭 불가 → 첫 번째 댓글로 클릭 가능한 구매 링크 제공
+  const ctaComment = [
+    `🛒 구매링크 (클릭!) → ${affiliateUrl}`,
+    ``,
+    `⚠️ 쿠팡 파트너스 활동으로 수수료를 받을 수 있습니다.`,
+  ].join('\n')
+  await postTopComment(result.videoId, ctaComment).catch(e =>
+    console.warn('[Workflow] CTA 댓글 게시 실패 (force_ssl scope 확인):', e instanceof Error ? e.message : String(e))
+  )
 
   // 훅 발동: youtube_uploaded → 워터폴 병렬 큐
   const waterfallJobs: Promise<void>[] = []

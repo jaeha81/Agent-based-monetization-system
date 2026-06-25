@@ -18,28 +18,33 @@ export function buildVeoPrompt(
   const points = scenario.performancePoints.slice(0, 2).join(', ')
   if (language === 'ko') {
     return (
-      `고품질 상업 광고 영상 8초. 제품명: ${productName}. ` +
-      `핵심 메시지: ${scenario.hook}. ` +
-      `주요 특징: ${points}. ` +
-      `가격 포인트: ${scenario.priceText}. ` +
-      `세로형(9:16), 전문 제품 클로즈업, 밝은 스튜디오 조명, ` +
-      `다이나믹 카메라 무빙, 상업 광고 스타일, 텍스트 없음, ` +
-      `깔끔한 그라디언트 배경, 4K 고해상도`
+      `고품질 한국 이커머스 쇼츠 광고 영상, 정확히 8초, 세로형 9:16 비율. ` +
+      `[씬1 0-2초] ${scenario.hook} — 극적 제품 reveal 클로즈업, 반짝이는 하이라이트 조명. ` +
+      `[씬2 2-5초] 제품 "${productName}" 360도 회전 쇼케이스, ${points}, 슬로우모션 질감 강조. ` +
+      `[씬3 5-7초] ${scenario.priceText} — 가격 강조 컷, 미니멀 배경에 제품 단독 클로즈업. ` +
+      `[씬4 7-8초] 강렬한 CTA: ${scenario.cta} — 카메라 줌인 엔딩. ` +
+      `전문 광고 촬영 스타일, 시네마틱 색감 보정, 밝고 청결한 스튜디오, ` +
+      `화이트/그라디언트 배경, 텍스트 없음, 4K 선명도`
     )
   }
   if (language === 'ja') {
     return (
-      `高品質な商業広告動画 8秒. 製品名: ${productName}. ` +
-      `キャッチコピー: ${scenario.hook}. 特長: ${points}. ` +
-      `縦型(9:16)、プロの製品クローズアップ、明るいスタジオ照明、` +
-      `ダイナミックカメラ、テキストなし、グラデーション背景`
+      `高品質Eコマースショートムービー 8秒 縦型9:16. ` +
+      `[Scene1 0-2s] ${scenario.hook} — ドラマチックな製品クローズアップ reveal. ` +
+      `[Scene2 2-5s] "${productName}" 360度ショーケース、${points}、スローモーション質感強調. ` +
+      `[Scene3 5-7s] ${scenario.priceText} — ミニマル背景でシングル製品フォーカス. ` +
+      `[Scene4 7-8s] CTA: ${scenario.cta} — ズームインエンディング. ` +
+      `プロ広告スタイル、シネマティック色調、明るいスタジオ、テキストなし`
     )
   }
   return (
-    `High-quality 8-second commercial video. Product: ${productName}. ` +
-    `Hook: ${scenario.hook}. Features: ${points}. Price: ${scenario.priceText}. ` +
-    `Vertical 9:16, professional product close-up, bright studio lighting, ` +
-    `dynamic camera movement, commercial style, no text overlay, clean gradient background`
+    `High-quality e-commerce shorts ad video, exactly 8 seconds, vertical 9:16. ` +
+    `[Scene1 0-2s] ${scenario.hook} — dramatic product reveal close-up, sparkling highlights. ` +
+    `[Scene2 2-5s] "${productName}" 360-degree showcase, ${points}, slow-motion texture emphasis. ` +
+    `[Scene3 5-7s] ${scenario.priceText} — price hero shot, product isolated on minimal background. ` +
+    `[Scene4 7-8s] Strong CTA: ${scenario.cta} — camera zoom-in ending. ` +
+    `Professional commercial photography style, cinematic color grading, ` +
+    `bright clean studio, white or gradient background, no text overlay, 4K clarity`
   )
 }
 

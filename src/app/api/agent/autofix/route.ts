@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { runBrainScan, getActiveProblems, resolveAndFix } from '@/lib/agent-brain'
 import { queryOne, execute, query } from '@/lib/db'
 import { pollShotstackRender } from '@/lib/shotstack'
@@ -35,6 +35,19 @@ async function validateShotstackKey(): Promise<boolean> {
     // 네트워크 오류는 키 무효로 간주하지 않음 (API 자체 문제일 수 있음)
     return true
   }
+}
+
+// GET /api/agent/autofix — Vercel 크론 엔드포인트 (CRON_SECRET Bearer 인증)
+export async function GET(req: NextRequest): Promise<NextResponse<AutofixResponse>> {
+  const cronSecret = process.env.CRON_SECRET
+  const authHeader = req.headers.get('authorization')
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json(
+      { ok: false, cycle: 0, scanned: 0, fixed: 0, remaining: 0, renderResumed: 0, shotstackKeyValid: true, log: ['Unauthorized'], elapsedMs: 0 },
+      { status: 401 }
+    )
+  }
+  return POST()
 }
 
 // POST /api/agent/autofix — 자율 자가수리 루프 1회 실행

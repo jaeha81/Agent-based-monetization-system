@@ -245,6 +245,7 @@ const MIGRATIONS = [
   `ALTER TABLE products ADD COLUMN image_url TEXT`,
   `ALTER TABLE content ADD COLUMN image_url TEXT`,
   `ALTER TABLE content ADD COLUMN render_status TEXT DEFAULT 'idle'`,
+  `ALTER TABLE products ADD COLUMN approved INTEGER DEFAULT 1`,
   `CREATE TABLE IF NOT EXISTS manual_revenue_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     platform TEXT NOT NULL,
