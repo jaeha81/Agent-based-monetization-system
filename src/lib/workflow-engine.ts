@@ -279,6 +279,7 @@ async function nodeVideoRender(
       language,
       content.hook || undefined,
       content.script || undefined,
+      content.coupang_url || undefined,
     ),
     generateProductImage(
       buildProductImagePrompt(content.product_name, content.category || '일반'),
@@ -357,6 +358,17 @@ async function nodeYouTubeUpload(
 ): Promise<void> {
   if (!input.contentId || !input.videoUrl) throw new Error('contentId and videoUrl required')
 
+  // 이미 posted 상태면 중복 업로드 방지
+  const currentStatus = await queryOne<{ status: string }>(
+    'SELECT status FROM content WHERE id = ?',
+    [input.contentId]
+  )
+  if (currentStatus?.status === 'posted') {
+    await completeJob(jobId, { skipped: true, reason: 'already_posted', contentId: input.contentId })
+    console.log(`[Workflow] youtube_upload skipped: content ${input.contentId} already posted`)
+    return
+  }
+
   const content = await queryOne<{
     id: number; hook: string | null; script: string | null
     product_name: string; category: string; coupang_url: string | null
@@ -369,10 +381,12 @@ async function nodeYouTubeUpload(
 
   const tags = buildShortsTags(content.product_name, content.category)
   const affiliateUrl = content.coupang_url || 'https://www.coupang.com'
-  const description = buildShortsDescription(content.script || '', affiliateUrl, tags)
+  // @everyday-c 스타일: 훅→링크→해시태그 순서
+  const description = buildShortsDescription(content.hook || content.script || '', affiliateUrl, tags)
+  const pinnedComment = `🔥 최저가 링크 → ${affiliateUrl}`
 
-  // Veo URI(generativelanguage.googleapis.com)는 API 키 인증 다운로드, 일반 URL은 직접 fetch
-  const isVeoUri = input.videoUrl.includes('generativelanguage.googleapis.com')
+  // Veo URI: googleapis.com 또는 base64 data URI — API 키 인증 다운로드 또는 디코딩
+  const isVeoUri = input.videoUrl.includes('generativelanguage.googleapis.com') || input.videoUrl.startsWith('data:')
   const videoBuffer = isVeoUri
     ? await downloadVeoVideo(input.videoUrl)
     : Buffer.from(await (await fetch(input.videoUrl)).arrayBuffer())
@@ -406,16 +420,6 @@ async function nodeYouTubeUpload(
   }
 
   await completeJob(jobId, { videoId: result.videoId, url: result.url, blobUrl })
-
-  // 고정 댓글: 쇼츠 설명란 URL은 클릭 불가 → 첫 번째 댓글로 클릭 가능한 구매 링크 제공
-  const ctaComment = [
-    `🛒 구매링크 (클릭!) → ${affiliateUrl}`,
-    ``,
-    `⚠️ 쿠팡 파트너스 활동으로 수수료를 받을 수 있습니다.`,
-  ].join('\n')
-  await postTopComment(result.videoId, ctaComment).catch(e =>
-    console.warn('[Workflow] CTA 댓글 게시 실패 (force_ssl scope 확인):', e instanceof Error ? e.message : String(e))
-  )
 
   // 훅 발동: youtube_uploaded → 워터폴 병렬 큐
   const waterfallJobs: Promise<void>[] = []
@@ -514,7 +518,7 @@ async function nodeInstagramReel(
   const content = await queryOne<{ hook: string | null; script: string | null; product_name: string; coupang_url: string | null }>(
     `SELECT c.hook, c.script, p.name as product_name, p.coupang_url
      FROM content c JOIN products p ON c.product_id = p.id WHERE c.id = ?`,
-    [input.contentId]
+    [input.contentId ?? 0]
   )
   if (!content) {
     await completeJob(jobId, { skipped: true, reason: 'content_not_found' })
@@ -537,7 +541,7 @@ async function nodeInstagramReel(
     const result = await postInstagramReel({ videoUrl: input.blobUrl, caption })
     await execute(
       `INSERT OR IGNORE INTO scheduled_posts (content_id, platform, status, published_at) VALUES (?, 'Instagram', 'published', datetime('now'))`,
-      [input.contentId]
+      [input.contentId ?? 0]
     )
     await completeJob(jobId, { mediaId: result.mediaId, url: result.url })
     console.log(`[Workflow] Instagram Reels 업로드 완료: ${result.url}`)
@@ -564,7 +568,7 @@ async function nodeTikTokVideo(
 
   const content = await queryOne<{ hook: string | null; product_name: string }>(
     `SELECT c.hook, p.name as product_name FROM content c JOIN products p ON c.product_id = p.id WHERE c.id = ?`,
-    [input.contentId]
+    [input.contentId ?? 0]
   )
   if (!content) {
     await completeJob(jobId, { skipped: true, reason: 'content_not_found' })
@@ -624,7 +628,7 @@ export async function startWorkflow(
 
 export async function pollWaitingVideoRenders(limit = 10): Promise<number> {
   const waitingJobs = await query<{ id: number; render_id: string }>(
-    `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL LIMIT ?`,
+    `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL ORDER BY id DESC LIMIT ?`,
     [limit]
   )
   if (waitingJobs.length === 0) return 0

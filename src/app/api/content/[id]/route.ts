@@ -3,6 +3,18 @@ import { execute, queryOne } from '@/lib/db'
 
 export const runtime = 'nodejs'
 
+export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+  const id = parseInt(params.id)
+  if (!id) return NextResponse.json({ error: 'invalid id' }, { status: 400 })
+  const content = await queryOne(
+    `SELECT c.*, p.name as product_name, p.category, p.coupang_url
+     FROM content c JOIN products p ON c.product_id = p.id WHERE c.id = ?`,
+    [id]
+  )
+  if (!content) return NextResponse.json({ error: 'not found' }, { status: 404 })
+  return NextResponse.json(content)
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const id = parseInt(params.id)
   if (!id) return NextResponse.json({ error: 'invalid id' }, { status: 400 })

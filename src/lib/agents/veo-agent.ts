@@ -1,4 +1,4 @@
-import type { VideoScenario } from './scenario-agent'
+import type { VideoScenario, SceneDefinition } from './scenario-agent'
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta'
 const MODEL = 'veo-2.0-generate-001'
@@ -10,62 +10,61 @@ export const VEO_PREFIX = 'veo:'
 export const isVeoRender = (renderId: string) => renderId.startsWith(VEO_PREFIX)
 export const toVeoOp = (renderId: string) => renderId.slice(VEO_PREFIX.length)
 
+// @everyday-c 스타일 기반 씬별 Veo 프롬프트 생성
+export function buildSceneVeoPrompt(
+  scene: SceneDefinition,
+  productName: string,
+): string {
+  const base = `${scene.veoPrompt}, no text overlay, no subtitles, 9:16 vertical aspect ratio`
+  return base
+}
+
+// 기존 단일 프롬프트 빌더 (Shotstack 폴백용으로 유지)
 export function buildVeoPrompt(
   scenario: VideoScenario,
   productName: string,
   language: string = 'ko',
 ): string {
-  const points = scenario.performancePoints.slice(0, 2).join(', ')
-  if (language === 'ko') {
-    return (
-      `고품질 한국 이커머스 쇼츠 광고 영상, 정확히 8초, 세로형 9:16 비율. ` +
-      `[씬1 0-2초] ${scenario.hook} — 극적 제품 reveal 클로즈업, 반짝이는 하이라이트 조명. ` +
-      `[씬2 2-5초] 제품 "${productName}" 360도 회전 쇼케이스, ${points}, 슬로우모션 질감 강조. ` +
-      `[씬3 5-7초] ${scenario.priceText} — 가격 강조 컷, 미니멀 배경에 제품 단독 클로즈업. ` +
-      `[씬4 7-8초] 강렬한 CTA: ${scenario.cta} — 카메라 줌인 엔딩. ` +
-      `전문 광고 촬영 스타일, 시네마틱 색감 보정, 밝고 청결한 스튜디오, ` +
-      `화이트/그라디언트 배경, 텍스트 없음, 4K 선명도`
-    )
+  // scenes가 있으면 hero 씬(씬2) 프롬프트 우선 사용
+  if (scenario.scenes && scenario.scenes.length >= 2) {
+    const heroScene = scenario.scenes[1]
+    return `${heroScene.veoPrompt}, no text overlay, 9:16 vertical, 8 seconds`
   }
+
+  const points = scenario.performancePoints.slice(0, 2).join(', ')
   if (language === 'ja') {
     return (
-      `高品質Eコマースショートムービー 8秒 縦型9:16. ` +
-      `[Scene1 0-2s] ${scenario.hook} — ドラマチックな製品クローズアップ reveal. ` +
-      `[Scene2 2-5s] "${productName}" 360度ショーケース、${points}、スローモーション質感強調. ` +
-      `[Scene3 5-7s] ${scenario.priceText} — ミニマル背景でシングル製品フォーカス. ` +
-      `[Scene4 7-8s] CTA: ${scenario.cta} — ズームインエンディング. ` +
-      `プロ広告スタイル、シネマティック色調、明るいスタジオ、テキストなし`
+      `High-quality 8-second commercial product video. Product: ${productName}. ` +
+      `Key message: ${scenario.hook}. Features: ${points}. ` +
+      `Vertical 9:16, dramatic product reveal on marble surface, studio lighting, ` +
+      `dynamic camera movement, no text overlay, clean background, 4K`
     )
   }
+  // ko/en 공통 — @everyday-c 스타일 (마블 테이블, 드라마틱 등장)
   return (
-    `High-quality e-commerce shorts ad video, exactly 8 seconds, vertical 9:16. ` +
-    `[Scene1 0-2s] ${scenario.hook} — dramatic product reveal close-up, sparkling highlights. ` +
-    `[Scene2 2-5s] "${productName}" 360-degree showcase, ${points}, slow-motion texture emphasis. ` +
-    `[Scene3 5-7s] ${scenario.priceText} — price hero shot, product isolated on minimal background. ` +
-    `[Scene4 7-8s] Strong CTA: ${scenario.cta} — camera zoom-in ending. ` +
-    `Professional commercial photography style, cinematic color grading, ` +
-    `bright clean studio, white or gradient background, no text overlay, 4K clarity`
+    `8-second product showcase video, ${productName} dramatically revealed on white marble surface, ` +
+    `professional studio lighting with rim light, slow 360 rotation or zoom-in reveal, ` +
+    `Korean shopping channel aesthetic, clean white/gradient background, ` +
+    `cinematic slow motion, no text overlay, 9:16 vertical, 4K high quality`
   )
 }
 
-// ─── 비동기 제출 (LRO 이름 반환) ──────────────────────────────────────────────
+// ─── 비동기 제출 (LRO 이름 반환) — predictLongRunning 사용 ──────────────────
 export async function submitVeoJob(prompt: string): Promise<string> {
   const key = getKey()
   if (!key) throw new Error('GEMINI_API_KEY 미설정 — Veo 사용 불가')
 
   const res = await fetch(
-    `${BASE}/models/${MODEL}:generateVideo?key=${key}`,
+    `${BASE}/models/${MODEL}:predictLongRunning?key=${key}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: `models/${MODEL}`,
-        prompt: { text: prompt },
-        config: {
+        instances: [{ prompt }],
+        parameters: {
           aspectRatio: '9:16',
-          durationSec: 8,
+          durationSeconds: 8,
           sampleCount: 1,
-          enhancePrompt: true,
         },
       }),
     }
@@ -73,7 +72,7 @@ export async function submitVeoJob(prompt: string): Promise<string> {
 
   if (!res.ok) {
     const errText = await res.text()
-    throw new Error(`Veo 제출 실패 (${res.status}): ${errText.slice(0, 300)}`)
+    throw new Error(`Veo 제출 실패 (${res.status}): ${errText.slice(0, 400)}`)
   }
 
   const data = await res.json() as { name?: string }
@@ -102,6 +101,13 @@ export async function pollVeoJob(renderId: string): Promise<{
   const data = await res.json() as {
     done?: boolean
     response?: {
+      // predictLongRunning 응답 형식
+      predictions?: Array<{
+        bytesBase64Encoded?: string
+        mimeType?: string
+        video?: { uri?: string }
+      }>
+      // 구버전 generateVideo 응답 형식 (호환성 유지)
       generatedVideos?: Array<{ video?: { uri: string; mimeType?: string } }>
     }
     error?: { message: string; code?: number }
@@ -111,7 +117,23 @@ export async function pollVeoJob(renderId: string): Promise<{
     return { status: 'failed', error: `Veo 오류: ${data.error.message}` }
   }
 
-  if (data.done && data.response?.generatedVideos?.[0]?.video?.uri) {
+  if (!data.done) return { status: 'pending' }
+
+  // predictions 배열 (predictLongRunning 응답)
+  const predictions = data.response?.predictions
+  if (predictions && predictions.length > 0) {
+    const pred = predictions[0]
+    if (pred.video?.uri) {
+      return { status: 'done', videoUri: pred.video.uri }
+    }
+    // base64 인코딩 응답 — data URI로 변환 (downloadVeoVideo에서 디코딩)
+    if (pred.bytesBase64Encoded) {
+      return { status: 'done', videoUri: `data:video/mp4;base64,${pred.bytesBase64Encoded}` }
+    }
+  }
+
+  // 구버전 generateVideo 응답 (호환성)
+  if (data.response?.generatedVideos?.[0]?.video?.uri) {
     return {
       status: 'done',
       videoUri: data.response.generatedVideos[0].video!.uri,
@@ -121,8 +143,14 @@ export async function pollVeoJob(renderId: string): Promise<{
   return { status: 'pending' }
 }
 
-// ─── 영상 다운로드 (Gemini Files API 인증) ────────────────────────────────────
+// ─── 영상 다운로드 (Gemini Files API 인증 또는 base64 디코딩) ─────────────────
 export async function downloadVeoVideo(uri: string): Promise<Buffer> {
+  // base64 data URI 처리
+  if (uri.startsWith('data:')) {
+    const base64Data = uri.split(',')[1]
+    return Buffer.from(base64Data, 'base64')
+  }
+
   const key = getKey()
   if (!key) throw new Error('GEMINI_API_KEY 미설정')
 

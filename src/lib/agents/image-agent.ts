@@ -1,17 +1,12 @@
 const STABILITY_API = 'https://api.stability.ai/v2beta/stable-image/generate/sd3'
+const SHOTSTACK_INGEST = 'https://api.shotstack.io/ingest'
 
-// 카테고리별 Unsplash 검색 키워드 (API 키 없이 사용 가능한 공개 이미지)
-const CATEGORY_KEYWORDS: Record<string, string> = {
-  '전자': 'electronics,gadget,technology',
-  '주방': 'kitchen,cooking,appliance',
-  '뷰티': 'beauty,cosmetics,skincare',
-  '패션': 'fashion,clothing,accessory',
-  '식품': 'food,organic,package',
-  '생활': 'home,lifestyle,household',
-  '스포츠': 'sports,fitness,exercise',
-  '유아': 'baby,children,toy',
-  '다이소': 'stationery,household,utility',
-}
+// Shotstack STAGE 파악 (shotstack.ts와 동일 로직)
+const getShotstackStage = () =>
+  process.env.SHOTSTACK_STAGE === 'v1' ? 'v1' : 'stage'
+
+const getShotstackKey = () =>
+  process.env.SHOTSTACK_API_KEY?.replace(/^﻿/, '').trim()
 
 export function buildProductImagePrompt(productName: string, category: string): string {
   const categoryMap: Record<string, string> = {
@@ -28,27 +23,76 @@ export function buildProductImagePrompt(productName: string, category: string): 
   return `${productName}, ${categoryHint}, professional product photography, white background, studio lighting, sharp focus, high resolution, commercial photography, no text, no watermark, clean minimal style`
 }
 
-// 카테고리 기반 Unsplash 이미지 URL (API 키 불필요 — 폴백용)
-export function buildFallbackImageUrl(productName: string, category: string): string {
-  const keywords = Object.entries(CATEGORY_KEYWORDS).find(([k]) => category.includes(k))?.[1]
-    || encodeURIComponent(productName.slice(0, 20))
-  // Unsplash source URL (공개 무료, 1080x1920 세로)
-  return `https://source.unsplash.com/1080x1920/?${keywords}`
+// binary → Shotstack Ingest API → HTTPS CDN URL
+// 실패 시 null 반환
+async function uploadToShotstack(arrayBuf: ArrayBuffer): Promise<string | null> {
+  const key = getShotstackKey()
+  const stage = getShotstackStage()
+  if (!key) return null
+
+  try {
+    const form = new FormData()
+    form.append('file', new Blob([arrayBuf], { type: 'image/jpeg' }), 'product.jpg')
+
+    const uploadRes = await fetch(`${SHOTSTACK_INGEST}/${stage}/sources`, {
+      method: 'POST',
+      headers: { 'x-api-key': key },
+      body: form,
+    })
+
+    if (!uploadRes.ok) {
+      const errText = await uploadRes.text()
+      console.warn('[ImageAgent] Shotstack Ingest 업로드 실패:', uploadRes.status, errText.slice(0, 120))
+      return null
+    }
+
+    const uploadJson = await uploadRes.json() as { data?: { id?: string } }
+    const sourceId = uploadJson?.data?.id
+    if (!sourceId) {
+      console.warn('[ImageAgent] Shotstack Ingest: source ID 없음')
+      return null
+    }
+
+    // 최대 20초 폴링 (2s × 10회)
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 2000))
+      const pollRes = await fetch(`${SHOTSTACK_INGEST}/${stage}/sources/${sourceId}`, {
+        headers: { 'x-api-key': key },
+      })
+      if (!pollRes.ok) continue
+
+      const pollJson = await pollRes.json() as { data?: { attributes?: { status?: string; url?: string } } }
+      const attrs = pollJson?.data?.attributes
+      if (attrs?.status === 'ready' && attrs?.url) {
+        console.log('[ImageAgent] Shotstack Ingest 완료:', attrs.url)
+        return attrs.url
+      }
+      if (attrs?.status === 'failed') {
+        console.warn('[ImageAgent] Shotstack Ingest 처리 실패')
+        return null
+      }
+    }
+
+    console.warn('[ImageAgent] Shotstack Ingest 타임아웃 (20s)')
+    return null
+  } catch (err) {
+    console.warn('[ImageAgent] Shotstack Ingest 오류:', err instanceof Error ? err.message : String(err))
+    return null
+  }
 }
 
-// Stability AI SD3로 제품 이미지 생성, URL 반환 (실패 시 Unsplash URL 폴백)
+// Stability AI SD3로 제품 이미지 생성 → Shotstack Ingest로 호스팅 → HTTPS URL 반환.
+// 키 미설정·실패·오류 시 null 반환 → Shotstack은 그라데이션 배경만으로 렌더.
 export async function generateProductImage(
   imagePrompt: string,
-  category: string = '일반',
-  productName: string = '',
+  _category: string = '일반',
+  _productName: string = '',
 ): Promise<string | null> {
   const apiKey = process.env.STABILITY_API_KEY?.replace(/^﻿/, '').trim()
 
-  // API 키 없으면 바로 Unsplash 폴백
   if (!apiKey) {
-    const url = buildFallbackImageUrl(productName, category)
-    console.log('[ImageAgent] STABILITY_API_KEY 미설정 → Unsplash 이미지 사용:', url)
-    return url
+    console.log('[ImageAgent] STABILITY_API_KEY 미설정 → 이미지 없이 그라데이션 배경 사용')
+    return null
   }
 
   try {
@@ -68,15 +112,22 @@ export async function generateProductImage(
 
     if (!res.ok) {
       const errText = await res.text()
-      console.warn('[ImageAgent] Stability AI 실패, Unsplash 폴백:', res.status, errText.slice(0, 100))
-      return buildFallbackImageUrl(productName, category)
+      console.warn('[ImageAgent] Stability AI 실패 → 그라데이션 배경 사용:', res.status, errText.slice(0, 100))
+      return null
     }
 
     const arrayBuf = await res.arrayBuffer()
-    const base64 = Buffer.from(arrayBuf).toString('base64')
-    return `data:image/jpeg;base64,${base64}`
+    console.log('[ImageAgent] Stability AI 이미지 생성 완료, Shotstack Ingest 업로드 중...')
+
+    // Shotstack Ingest로 HTTPS URL 획득
+    const hostedUrl = await uploadToShotstack(arrayBuf)
+    if (hostedUrl) return hostedUrl
+
+    // Ingest 실패 시 null (그라데이션 폴백 — data URI 반환하지 않음)
+    console.warn('[ImageAgent] Ingest 실패 → 이미지 없이 그라데이션 배경 사용')
+    return null
   } catch (err) {
-    console.warn('[ImageAgent] 이미지 생성 오류, Unsplash 폴백:', err instanceof Error ? err.message : String(err))
-    return buildFallbackImageUrl(productName, category)
+    console.warn('[ImageAgent] 이미지 생성 오류 → 그라데이션 배경 사용:', err instanceof Error ? err.message : String(err))
+    return null
   }
 }

@@ -157,6 +157,21 @@ export async function patchVideoNotForKids(videoId: string): Promise<void> {
   }
 }
 
+export async function deleteYouTubeVideo(videoId: string): Promise<void> {
+  const accessToken = await refreshAccessToken()
+
+  const res = await fetch(`${YT_API}/videos?id=${encodeURIComponent(videoId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+
+  // 성공 시 204 No Content
+  if (!res.ok && res.status !== 204) {
+    const err = await res.text()
+    throw new Error(`YouTube 영상 삭제 실패 (${videoId}): ${err}`)
+  }
+}
+
 export async function getChannelStats(): Promise<{
   subscriberCount: number
   viewCount: number
@@ -200,22 +215,24 @@ export async function getVideoStats(videoId: string): Promise<{ viewCount: numbe
 }
 
 export function buildShortsDescription(
-  script: string,
+  hookOrScript: string,
   affiliateUrl: string,
   hashtags: string[]
 ): string {
+  // @everyday-c 스타일: 훅 → 링크 → 해시태그 → 공시
+  const tagLine = hashtags.map(h => h.startsWith('#') ? h : `#${h}`).join(' ')
   return [
-    '⚠️ 이 영상은 쿠팡 파트너스 활동으로 수수료를 받을 수 있습니다.',
-    '⚠️ AI(인공지능)로 생성된 콘텐츠입니다.',
+    hookOrScript.slice(0, 150),
     '',
-    script,
+    '✅ 지금 최저가 확인 👇',
+    affiliateUrl,
     '',
-    '━━━━━━━━━━━━━━━━━━━━━━',
-    '🛒 구매링크 → 아래 고정 댓글 확인 (클릭 가능)',
-    `구매링크: ${affiliateUrl}`,
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '⏰ 오늘만 이 가격! 서두르세요',
     '',
-    hashtags.map(h => `#${h}`).join(' '),
+    tagLine,
+    '',
+    '※ 이 영상은 쿠팡 파트너스 활동의 일환으로 수수료를 받을 수 있습니다.',
+    '※ AI(인공지능)로 생성된 콘텐츠입니다.',
   ].join('\n')
 }
 

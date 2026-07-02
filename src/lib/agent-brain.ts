@@ -393,20 +393,25 @@ export async function resolveAndFix(
         }
 
         // 실패한 video_render 잡을 queued로 재설정 → 다음 처리 사이클에서 재시도
+        // 재시도 캡: retry_count >= MAX 인 잡은 영구 실패로 두고 재제출하지 않음
+        // (Shotstack 프로덕션 크레딧 무한 소모 루프 차단)
+        const MAX_RENDER_RETRY = 2
         const failedJobs = await query<{ id: number }>(
           `SELECT id FROM workflow_jobs
            WHERE node_type='video_render' AND status='failed'
-           AND created_at > datetime('now','-48 hours')`
+           AND created_at > datetime('now','-48 hours')
+           AND COALESCE(retry_count, 0) < ${MAX_RENDER_RETRY}`
         )
         if (failedJobs.length === 0) {
           action = 'no_failed_jobs'
-          detail = '재시도할 실패 잡이 없습니다. 에러가 자연 소멸됐거나 이미 처리됨.'
+          detail = `재시도할 실패 잡이 없습니다 (재시도 ${MAX_RENDER_RETRY}회 초과분은 영구 실패로 보존 — 크레딧 보호).`
           break
         }
         for (const job of failedJobs) {
           await execute(
             `UPDATE workflow_jobs
-             SET status='queued', error=NULL, started_at=NULL, completed_at=NULL
+             SET status='queued', error=NULL, started_at=NULL, completed_at=NULL,
+                 retry_count=COALESCE(retry_count, 0)+1
              WHERE id=?`,
             [job.id]
           )
@@ -415,7 +420,7 @@ export async function resolveAndFix(
         const { processPendingJobs } = await import('./workflow-engine')
         await processPendingJobs(undefined, failedJobs.length)
         action = 'render_requeued'
-        detail = `실패한 렌더 ${failedJobs.length}건을 재시도 큐에 넣고 즉시 처리를 시작했습니다.`
+        detail = `실패한 렌더 ${failedJobs.length}건을 재시도 큐에 넣고 즉시 처리를 시작했습니다 (재시도 캡 ${MAX_RENDER_RETRY}회).`
         break
       }
 

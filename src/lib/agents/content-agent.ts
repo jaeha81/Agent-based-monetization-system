@@ -230,7 +230,7 @@ Disclosure to include: ${disclosure}`
   for (const c of batch.contents) {
     const { lastInsertRowid } = await execute(
       'INSERT INTO content (product_id, platform, hook, script, image_prompt, status, target_market, language, ab_group) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [productId, c.platform, c.hook, c.script, c.image_prompt, 'draft', targetMarket, language, 'A']
+      [productId, c.platform, c.hook ?? null, c.script ?? null, c.image_prompt ?? null, 'draft', targetMarket, language, 'A']
     )
     savedIds.push(lastInsertRowid)
   }

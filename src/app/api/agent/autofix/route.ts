@@ -3,11 +3,11 @@ import { runBrainScan, getActiveProblems, resolveAndFix } from '@/lib/agent-brai
 import { queryOne, execute, query } from '@/lib/db'
 import { pollShotstackRender } from '@/lib/shotstack'
 import { pollVeoJob, isVeoRender } from '@/lib/agents/veo-agent'
-import { resumeVideoRenderJob } from '@/lib/workflow-engine'
+import { resumeVideoRenderJob, processPendingJobs } from '@/lib/workflow-engine'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 25
+export const maxDuration = 300
 
 interface AutofixResponse {
   ok: boolean
@@ -16,6 +16,7 @@ interface AutofixResponse {
   fixed: number
   remaining: number
   renderResumed: number
+  processedQueued: number
   shotstackKeyValid: boolean
   log: string[]
   elapsedMs: number
@@ -35,19 +36,6 @@ async function validateShotstackKey(): Promise<boolean> {
     // 네트워크 오류는 키 무효로 간주하지 않음 (API 자체 문제일 수 있음)
     return true
   }
-}
-
-// GET /api/agent/autofix — Vercel 크론 엔드포인트 (CRON_SECRET Bearer 인증)
-export async function GET(req: NextRequest): Promise<NextResponse<AutofixResponse>> {
-  const cronSecret = process.env.CRON_SECRET
-  const authHeader = req.headers.get('authorization')
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json(
-      { ok: false, cycle: 0, scanned: 0, fixed: 0, remaining: 0, renderResumed: 0, shotstackKeyValid: true, log: ['Unauthorized'], elapsedMs: 0 },
-      { status: 401 }
-    )
-  }
-  return POST()
 }
 
 // POST /api/agent/autofix — 자율 자가수리 루프 1회 실행
@@ -118,7 +106,7 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
     let renderResumed = 0
     try {
       const waitingJobs = await query<{ id: number; render_id: string }>(
-        `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL LIMIT 10`
+        `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL ORDER BY id DESC LIMIT 10`
       )
 
       if (waitingJobs.length > 0) {
@@ -158,10 +146,10 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
                 log.push(`  ✓ [Shotstack] ${job.render_id.slice(0, 20)}... 완료 → youtube_upload 트리거`)
               } else if (poll.status === 'failed') {
                 await execute(
-                  `UPDATE workflow_jobs SET status = 'failed', error = 'Shotstack render failed' WHERE id = ?`,
-                  [job.id]
+                  `UPDATE workflow_jobs SET status = 'failed', error = ? WHERE id = ?`,
+                  [`Shotstack: ${poll.error || 'render failed (no detail)'}`, job.id]
                 )
-                log.push(`  ✕ [Shotstack] ${job.render_id.slice(0, 20)}... 실패`)
+                log.push(`  ✕ [Shotstack] ${job.render_id.slice(0, 20)}... 실패: ${(poll.error || '사유 미상').slice(0, 80)}`)
               } else {
                 log.push(`  ⏳ [Shotstack] ${job.render_id.slice(0, 20)}... 진행 중 (${poll.status})`)
               }
@@ -176,6 +164,15 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
       }
     } catch (e) {
       log.push(`렌더 폴링 오류: ${e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80)}`)
+    }
+
+    // ── 4c. 큐 드레인 (queued 잡 처리) ──────────────────────────────────────
+    let processedQueued = 0
+    try {
+      processedQueued = await processPendingJobs(undefined, 20)
+      log.push(`큐 드레인: ${processedQueued}개 queued 잡 처리 완료`)
+    } catch (e) {
+      log.push(`큐 드레인 오류: ${e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80)}`)
     }
 
     // ── 5. 수리 후 재스캔 (After) ──────────────────────────────────────────
@@ -214,6 +211,7 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
       fixed,
       remaining,
       renderResumed,
+      processedQueued,
       shotstackKeyValid,
       log,
       elapsedMs,
@@ -231,6 +229,7 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
         fixed: 0,
         remaining: 0,
         renderResumed: 0,
+        processedQueued: 0,
         shotstackKeyValid: true,
         log,
         elapsedMs,
@@ -238,4 +237,60 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
       { status: 500 }
     )
   }
+}
+
+// GET /api/agent/autofix — Vercel Cron 전용 (매시간, CRON_SECRET 인증)
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const auth = req.headers.get('Authorization') || ''
+  const secret = process.env.CRON_SECRET?.trim()
+  if (!secret || auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const log: string[] = []
+  let renderResumed = 0
+  let processedQueued = 0
+
+  // 렌더 폴링 (Shotstack + Veo)
+  try {
+    const shotstackKeyValid = await validateShotstackKey()
+    const waitingJobs = await query<{ id: number; render_id: string }>(
+      `SELECT id, render_id FROM workflow_jobs WHERE status = 'waiting' AND render_id IS NOT NULL ORDER BY id DESC LIMIT 10`
+    )
+    for (const job of waitingJobs) {
+      try {
+        if (isVeoRender(job.render_id)) {
+          if (!process.env.GEMINI_API_KEY) continue
+          const poll = await pollVeoJob(job.render_id)
+          if (poll.status === 'done' && poll.videoUri) {
+            await resumeVideoRenderJob(job.render_id, poll.videoUri)
+            renderResumed++
+          } else if (poll.status === 'failed') {
+            await execute(`UPDATE workflow_jobs SET status = 'failed', error = ? WHERE id = ?`, [poll.error || 'Veo failed', job.id])
+          }
+        } else if (shotstackKeyValid) {
+          const poll = await pollShotstackRender(job.render_id)
+          if (poll.status === 'done' && poll.url) {
+            await resumeVideoRenderJob(job.render_id, poll.url)
+            renderResumed++
+          } else if (poll.status === 'failed') {
+            await execute(`UPDATE workflow_jobs SET status = 'failed', error = ? WHERE id = ?`, [`Shotstack: ${poll.error || 'render failed (no detail)'}`, job.id])
+          }
+        }
+      } catch { /* 개별 폴링 오류 무시 */ }
+    }
+    log.push(`렌더 폴링: ${renderResumed}건 완료`)
+  } catch (e) {
+    log.push(`렌더 폴링 오류: ${e instanceof Error ? e.message : String(e)}`)
+  }
+
+  // 큐 드레인
+  try {
+    processedQueued = await processPendingJobs(undefined, 15)
+    log.push(`큐 드레인: ${processedQueued}건 처리`)
+  } catch (e) {
+    log.push(`큐 드레인 오류: ${e instanceof Error ? e.message : String(e)}`)
+  }
+
+  return NextResponse.json({ ok: true, renderResumed, processedQueued, log })
 }

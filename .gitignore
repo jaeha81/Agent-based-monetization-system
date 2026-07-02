@@ -41,3 +41,7 @@ next-env.d.ts
 /data/*.db-wal
 
 .vercel
+
+# session handoff logs
+HANDOFF_*.md
+.env.pulled.prod
