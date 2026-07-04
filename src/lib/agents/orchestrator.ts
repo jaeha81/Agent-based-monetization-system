@@ -111,7 +111,7 @@ export async function runFullCycle(): Promise<OrchestratorResult> {
     // 기존 고성과 제품도 추가
     if (newProductIds.length < 3) {
       const top = await query<{ id: number }>(
-        `SELECT id FROM products ORDER BY viral_score DESC LIMIT 5`
+        `SELECT id FROM products WHERE approved IS NOT 0 ORDER BY viral_score DESC LIMIT 5`
       )
       newProductIds.push(...top.map(r => r.id).slice(0, 3 - newProductIds.length))
     }
@@ -126,7 +126,7 @@ export async function runFullCycle(): Promise<OrchestratorResult> {
     await completeTask(trendTaskId, msg, 'failed')
     results.trend_agent = { status: 'error', summary: msg, revenueAdded: 0 }
     // fallback: use existing products
-    const top = await query<{ id: number }>('SELECT id FROM products ORDER BY viral_score DESC LIMIT 3')
+    const top = await query<{ id: number }>('SELECT id FROM products WHERE approved IS NOT 0 ORDER BY viral_score DESC LIMIT 3')
     newProductIds.push(...top.map(r => r.id))
   }
 

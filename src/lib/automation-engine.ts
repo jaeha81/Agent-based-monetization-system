@@ -88,9 +88,9 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
         // Global markets — use trend agent to discover products
         try {
           await runTrendAgent(keyword)
-          const recent = await query<{ id: number }>(`SELECT id FROM products WHERE target_market = ? ORDER BY id DESC LIMIT 5`, [market])
+          const recent = await query<{ id: number }>(`SELECT id FROM products WHERE target_market = ? AND approved IS NOT 0 ORDER BY id DESC LIMIT 5`, [market])
           if (!recent.length) {
-            const fallback = await query<{ id: number }>('SELECT id FROM products ORDER BY id DESC LIMIT 5')
+            const fallback = await query<{ id: number }>('SELECT id FROM products WHERE approved IS NOT 0 ORDER BY id DESC LIMIT 5')
             savedProductIds.push(...fallback.map(r => r.id))
           } else {
             savedProductIds.push(...recent.map(r => r.id))
@@ -102,15 +102,15 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
 
       if (savedProductIds.length === 0) {
         await runTrendAgent(keyword)
-        const recent = await query<{ id: number }>('SELECT id FROM products ORDER BY id DESC LIMIT 5')
+        const recent = await query<{ id: number }>('SELECT id FROM products WHERE approved IS NOT 0 ORDER BY id DESC LIMIT 5')
         savedProductIds.push(...recent.map(r => r.id))
       }
 
       for (const productId of savedProductIds.slice(0, 3)) {
         const product = await queryOne<{ id: number; name: string; category: string; coupang_url: string | null }>(
-          'SELECT * FROM products WHERE id = ?', [productId]
+          'SELECT * FROM products WHERE id = ? AND approved IS NOT 0', [productId]
         )
-        if (!product) continue
+        if (!product) continue  // 없거나 거절된(approved=0) 제품 → 콘텐츠 생성 스킵
 
         const existingContent = await queryOne<{ c: number }>(
           `SELECT COUNT(*) as c FROM content WHERE product_id = ? AND target_market = ? AND created_at > datetime('now', '-14 days')`,

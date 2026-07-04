@@ -16,16 +16,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  if (!process.env.YOUTUBE_CLIENT_ID || !process.env.YOUTUBE_REFRESH_TOKEN) {
+    return NextResponse.json({ ok: true, message: 'YouTube 자격증명 미설정', updated: 0, renderResumed: 0 })
+  }
+
   // 17:00 daily cron에서 제출된 Veo/Shotstack 렌더가 완료됐는지 폴링 → youtube_upload 트리거
+  // YouTube 자격증명 확인 후에만 폴링 — 토큰 무효 시 완성 렌더를 소비→업로드 실패→영상 유실 방지
   const renderResumed = await pollWaitingVideoRenders(20).catch(e => {
     console.error('[revenue-sync] 렌더 폴링 오류:', e instanceof Error ? e.message : String(e))
     return 0
   })
   console.log(`[revenue-sync] 렌더 폴링 완료: ${renderResumed}건 업로드 트리거됨`)
-
-  if (!process.env.YOUTUBE_CLIENT_ID || !process.env.YOUTUBE_REFRESH_TOKEN) {
-    return NextResponse.json({ ok: true, message: 'YouTube 자격증명 미설정', updated: 0, renderResumed })
-  }
 
   // YouTube에 실제 업로드된 콘텐츠의 조회수 가져오기
   const postedYoutube = await query<{

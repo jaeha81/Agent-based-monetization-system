@@ -207,10 +207,15 @@ async function nodeContentGeneration(
 ): Promise<void> {
   if (!input.productId) throw new Error('productId required')
 
-  const product = await queryOne<{ id: number; name: string; category: string; coupang_url: string | null }>(
+  const product = await queryOne<{ id: number; name: string; category: string; coupang_url: string | null; approved: number | null }>(
     'SELECT * FROM products WHERE id = ?', [input.productId]
   )
   if (!product) throw new Error(`Product ${input.productId} not found`)
+  if (product.approved === 0) {
+    // 거절된 제품 → 콘텐츠 생성 스킵 (jobId만 완료 처리)
+    await completeJob(jobId, { skipped: true, reason: 'product_rejected' })
+    return
+  }
 
   const existing = await queryOne<{ c: number }>(
     `SELECT COUNT(*) as c FROM content WHERE product_id = ? AND created_at > datetime('now', '-1 days')`,
