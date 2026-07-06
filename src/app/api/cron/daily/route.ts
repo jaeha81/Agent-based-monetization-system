@@ -20,7 +20,9 @@ export async function GET(req: NextRequest) {
 
   try {
     // 0. 이전 run에서 waiting 상태로 남은 렌더 잡 정리 (어제 미완료 건)
-    const prevResumed = await pollWaitingVideoRenders(10).catch(() => 0)
+    //    YouTube 업로드 자격증명(3키) 완비 시에만 폴링 — 불완전 시 완성 렌더 소비→업로드 실패→유실 방지
+    const canUpload = !!(process.env.YOUTUBE_CLIENT_ID && process.env.YOUTUBE_CLIENT_SECRET && process.env.YOUTUBE_REFRESH_TOKEN)
+    const prevResumed = canUpload ? await pollWaitingVideoRenders(10).catch(() => 0) : 0
     if (prevResumed > 0) console.log(`[Cron/Daily] 이전 waiting 렌더 ${prevResumed}건 업로드 트리거됨`)
 
     // 1. 파이프라인 실행
