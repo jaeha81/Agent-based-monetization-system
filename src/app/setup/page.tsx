@@ -46,7 +46,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   coupang: '쿠팡 Reporting',
   youtube: 'YouTube OAuth',
   shotstack: 'Shotstack',
-  tts: 'Google TTS',
+  tts: 'TTS (Google 또는 로컬 MeloTTS)',
 }
 
 type StepItem = { text: string; url?: string }

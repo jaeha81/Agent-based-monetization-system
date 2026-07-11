@@ -16,7 +16,7 @@ const REQUIRED_KEYS = [
   'TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN', 'GEMINI_API_KEY', 'CRON_SECRET',
   'DASHBOARD_PASSWORD', 'UPLOAD_SECRET', 'COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY',
   'YOUTUBE_CLIENT_ID', 'YOUTUBE_CLIENT_SECRET', 'YOUTUBE_REFRESH_TOKEN',
-  'SHOTSTACK_API_KEY', 'SHOTSTACK_WEBHOOK_SECRET', 'GOOGLE_TTS_API_KEY',
+  'SHOTSTACK_API_KEY', 'SHOTSTACK_WEBHOOK_SECRET',
   'TTS_SIGNING_SECRET', 'CLICK_HASH_SECRET', 'NEXT_PUBLIC_APP_URL',
 ] as const
 
@@ -35,12 +35,17 @@ export function getProductionConfigurationStatus(): {
   failures: string[]
   warnings: string[]
 } {
-  const configured = Object.fromEntries(REQUIRED_KEYS.map(key => [key, Boolean(value(key))]))
+  const configured = Object.fromEntries(REQUIRED_KEYS.map(key => [key, Boolean(value(key))])) as Record<string, boolean>
+  configured.GOOGLE_TTS_API_KEY = Boolean(value('GOOGLE_TTS_API_KEY'))
+  configured.LOCAL_TTS_URL = Boolean(value('LOCAL_TTS_URL'))
+  configured.LOCAL_TTS_TOKEN = Boolean(value('LOCAL_TTS_TOKEN'))
   configured.YOUTUBE_API_KEY = Boolean(value('YOUTUBE_API_KEY') || value('GOOGLE_API_KEY'))
   const failures: string[] = []
   const warnings: string[] = []
 
   for (const key of REQUIRED_KEYS) if (!configured[key]) failures.push(`${key}:missing`)
+  if (!configured.GOOGLE_TTS_API_KEY && !configured.LOCAL_TTS_URL) failures.push('TTS_PROVIDER:missing')
+  if (configured.LOCAL_TTS_URL && !configured.LOCAL_TTS_TOKEN) failures.push('LOCAL_TTS_TOKEN:missing')
   if (!configured.YOUTUBE_API_KEY) failures.push('YOUTUBE_API_KEY:missing')
   for (const key of SECRET_KEYS) if (value(key) && value(key).length < 24) failures.push(`${key}:too_short`)
   for (let left = 0; left < SECRET_KEYS.length; left++) {
@@ -156,6 +161,15 @@ async function verifyShotstack(): Promise<ProviderVerificationResult> {
 
 async function verifyTts(): Promise<ProviderVerificationResult> {
   const key = value('GOOGLE_TTS_API_KEY')
+  const localUrl = value('LOCAL_TTS_URL')
+  if (!key && localUrl) {
+    return timed(async signal => {
+      const response = await fetch(`${localUrl.replace(/\/$/, '')}/health`, { signal, headers: { Authorization: `Bearer ${value('LOCAL_TTS_TOKEN')}` } })
+      return response.ok
+        ? { state: 'valid', message: '로컬 MeloTTS 워커 연결 확인 완료' }
+        : { state: 'invalid', message: `로컬 TTS HTTP ${response.status}` }
+    })
+  }
   if (!key) return { state: 'missing', latencyMs: 0, message: 'API 키 미설정' }
   return timed(async signal => {
     const response = await fetch(`https://texttospeech.googleapis.com/v1/voices?languageCode=ko-KR&key=${encodeURIComponent(key)}`, { signal })

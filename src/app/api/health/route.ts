@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   checks.youtube = { ok: configuration.configured.YOUTUBE_CLIENT_ID && configuration.configured.YOUTUBE_CLIENT_SECRET && configuration.configured.YOUTUBE_REFRESH_TOKEN }
   checks.youtubeTrends = { ok: configuration.configured.YOUTUBE_API_KEY }
   checks.shotstack = { ok: configuration.configured.SHOTSTACK_API_KEY && process.env.SHOTSTACK_STAGE === 'v1' }
-  checks.tts = { ok: configuration.configured.GOOGLE_TTS_API_KEY && configuration.configured.TTS_SIGNING_SECRET }
+  checks.tts = { ok: (configuration.configured.GOOGLE_TTS_API_KEY || configuration.configured.LOCAL_TTS_URL) && configuration.configured.TTS_SIGNING_SECRET }
   checks.operationalDb = { ok: configuration.configured.TURSO_DATABASE_URL && configuration.configured.TURSO_AUTH_TOKEN }
   checks.affiliateTracking = { ok: checks.coupang.ok && !!process.env.COUPANG_SUB_ID }
   checks.autoPublish = { ok: process.env.AUTO_PUBLISH_ENABLED === 'true', reason: process.env.AUTO_PUBLISH_ENABLED === 'true' ? undefined : '안전상 비활성' }

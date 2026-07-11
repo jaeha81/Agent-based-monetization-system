@@ -314,7 +314,7 @@ export async function renderShortsVideo(
 // ─── Vercel TTS 프록시 URL 생성 (Shotstack이 직접 다운로드) ────────────────────
 // GOOGLE_TTS_API_KEY 설정 시 한국어 음성 반환, 미설정 시 null → 음악만 사용
 async function generateShotstackTTS(text: string, voice: string = 'Seoyeon'): Promise<string | null> {
-  if (!process.env.GOOGLE_TTS_API_KEY) return null
+  if (!process.env.GOOGLE_TTS_API_KEY && !process.env.LOCAL_TTS_URL) return null
   const lang = voice === 'Seoyeon' ? 'ko' : voice === 'Mizuki' ? 'ja' : 'en'
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
   const safeText = text.slice(0, 500)
