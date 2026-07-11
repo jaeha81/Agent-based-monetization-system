@@ -29,16 +29,16 @@ export async function getRevenueSummary(): Promise<RevenueSummary> {
   const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7)
   const monthAgo = new Date(now); monthAgo.setDate(monthAgo.getDate() - 30)
 
-  const totalRevRow = await queryOne<{ t: number }>('SELECT COALESCE(SUM(amount),0) as t FROM revenue_logs')
+  const totalRevRow = await queryOne<{ t: number }>('SELECT COALESCE(SUM(amount),0) as t FROM revenue_events')
   const totalRev = totalRevRow?.t ?? 0
 
-  const monthRevRow = await queryOne<{ t: number }>('SELECT COALESCE(SUM(amount),0) as t FROM revenue_logs WHERE logged_at >= ?', [monthAgo.toISOString()])
+  const monthRevRow = await queryOne<{ t: number }>('SELECT COALESCE(SUM(amount),0) as t FROM revenue_events WHERE logged_at >= ?', [monthAgo.toISOString()])
   const monthRev = monthRevRow?.t ?? 0
 
-  const weekRevRow = await queryOne<{ t: number }>('SELECT COALESCE(SUM(amount),0) as t FROM revenue_logs WHERE logged_at >= ?', [weekAgo.toISOString()])
+  const weekRevRow = await queryOne<{ t: number }>('SELECT COALESCE(SUM(amount),0) as t FROM revenue_events WHERE logged_at >= ?', [weekAgo.toISOString()])
   const weekRev = weekRevRow?.t ?? 0
 
-  const todayRevRow = await queryOne<{ t: number }>('SELECT COALESCE(SUM(amount),0) as t FROM revenue_logs WHERE logged_at LIKE ?', [todayStr + '%'])
+  const todayRevRow = await queryOne<{ t: number }>('SELECT COALESCE(SUM(amount),0) as t FROM revenue_events WHERE logged_at LIKE ?', [todayStr + '%'])
   const todayRev = todayRevRow?.t ?? 0
 
   const totalContentRow = await queryOne<{ c: number }>('SELECT COUNT(*) as c FROM content')
@@ -49,7 +49,7 @@ export async function getRevenueSummary(): Promise<RevenueSummary> {
 
   const dailyRows = await query<{ date: string; revenue: number }>(`
     SELECT DATE(logged_at) as date, SUM(amount) as revenue
-    FROM revenue_logs
+    FROM revenue_events
     WHERE logged_at >= ?
     GROUP BY DATE(logged_at)
     ORDER BY date
@@ -62,10 +62,9 @@ export async function getRevenueSummary(): Promise<RevenueSummary> {
   }))
 
   const platformRows = await query<{ platform: string; revenue: number }>(`
-    SELECT a.platform, SUM(rl.amount) as revenue
-    FROM revenue_logs rl
-    JOIN accounts a ON rl.account_id = a.id
-    GROUP BY a.platform
+    SELECT platform, SUM(amount) as revenue
+    FROM revenue_events
+    GROUP BY platform
     ORDER BY revenue DESC
   `)
 
@@ -79,16 +78,17 @@ export async function getRevenueSummary(): Promise<RevenueSummary> {
   const topPlatform = platformData[0]?.platform || 'YouTube'
 
   const topContentRows = await query<{ id: number; name: string; platform: string; views: number; revenue: number; status: string }>(`
-    SELECT c.id, p.name, c.platform, c.views, c.revenue, c.status
+    SELECT c.id, p.name, c.platform, c.views, COALESCE(SUM(re.amount), 0) revenue, c.status
     FROM content c
     JOIN products p ON c.product_id = p.id
-    WHERE c.status = 'posted'
-    ORDER BY c.revenue DESC
+    LEFT JOIN revenue_events re ON re.content_id = c.id
+    GROUP BY c.id
+    ORDER BY revenue DESC
     LIMIT 10
   `)
 
   const prevMonthRevRow = await queryOne<{ t: number }>(
-    'SELECT COALESCE(SUM(amount),0) as t FROM revenue_logs WHERE logged_at >= ? AND logged_at < ?',
+    'SELECT COALESCE(SUM(amount),0) as t FROM revenue_events WHERE logged_at >= ? AND logged_at < ?',
     [new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString(), monthAgo.toISOString()]
   )
   const prevMonthRev = prevMonthRevRow?.t ?? 0

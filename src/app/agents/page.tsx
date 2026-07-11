@@ -521,7 +521,7 @@ export default function AgentsPage() {
             ) : (
               <div className="text-center py-6">
                 <Brain className="w-8 h-8 mx-auto mb-2 text-violet-200" />
-                <p className="text-xs text-gray-400">"두뇌 스캔" 버튼으로 시스템 진단</p>
+                <p className="text-xs text-gray-400">&quot;두뇌 스캔&quot; 버튼으로 시스템 진단</p>
               </div>
             )}
           </CardContent>

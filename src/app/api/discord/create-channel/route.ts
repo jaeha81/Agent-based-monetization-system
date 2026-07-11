@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sendDiscordWebhook, makeEmbed, COLORS } from '@/lib/discord'
+import { isAdminRequest } from '@/lib/admin-auth'
 
 export const runtime = 'nodejs'
 
 const CHANNEL_NAME = '쇼츠-자동화'
 const WEBHOOK_NAME = '쇼츠자동화봇'
 const CHANNEL_TOPIC = '🤖 쇼핑 숏츠 자동화 시스템 — 알림·리포트·커맨드 채널'
-
-function isAuthorized(req: NextRequest): boolean {
-  const secret = req.headers.get('authorization')?.replace('Bearer ', '')
-  return secret === process.env.CRON_SECRET
-}
 
 interface DiscordChannel {
   id: string
@@ -39,7 +35,7 @@ async function botFetch(path: string, options: RequestInit = {}) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  if (!await isAdminRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

@@ -1,21 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query, queryOne, execute } from '@/lib/db'
 import { deleteYouTubeVideo } from '@/lib/youtube'
+import { isAdminRequest } from '@/lib/admin-auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
 // POST /api/admin/reset-content
-// Authorization: Bearer <CRON_SECRET>
 // body: { contentId: number, deleteVideoId?: string }
 //
 // posted 처리된 콘텐츠를 재업로드 가능한 draft 상태로 되돌린다.
 //  - deleteVideoId 가 있으면 기존 OAuth 토큰으로 YouTube 영상도 삭제 시도.
 //  - content / scheduled_posts 데이터만 UPDATE (스키마 변경 없음).
 export async function POST(req: NextRequest) {
-  const secret = req.headers.get('authorization')?.replace('Bearer ', '').trim()
-  const expected = (process.env.CRON_SECRET || '').trim()
-  if (!secret || !expected || secret !== expected) {
+  if (!await isAdminRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

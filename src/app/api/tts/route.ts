@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyTtsToken } from '@/lib/tts-auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 15
@@ -9,8 +10,10 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const text = searchParams.get('text') || ''
   const lang = searchParams.get('lang') || 'ko'
+  const token = searchParams.get('token')
 
   if (!text) return new NextResponse(null, { status: 400 })
+  if (!await verifyTtsToken(text.slice(0, 500), lang, token)) return new NextResponse(null, { status: 401 })
 
   const googleKey = process.env.GOOGLE_TTS_API_KEY?.replace(/^﻿/, '').trim()
   if (!googleKey) return new NextResponse(null, { status: 503 })

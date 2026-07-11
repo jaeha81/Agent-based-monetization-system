@@ -5,8 +5,8 @@ export const runtime = 'nodejs'
 export const maxDuration = 120
 
 function isAuthorized(req: NextRequest): boolean {
-  const secret = req.headers.get('authorization')?.replace('Bearer ', '')
-  return secret === process.env.CRON_SECRET
+  const secret = process.env.CRON_SECRET?.trim()
+  return !!secret && req.headers.get('authorization') === `Bearer ${secret}`
 }
 
 export async function GET(req: NextRequest) {

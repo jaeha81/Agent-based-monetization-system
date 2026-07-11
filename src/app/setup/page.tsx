@@ -27,6 +27,28 @@ interface EnvStatus {
   FACEBOOK_PAGE_ID: boolean
 }
 
+type ProviderState = 'valid' | 'partial' | 'invalid' | 'missing' | 'unavailable'
+interface LiveVerification {
+  ok: boolean
+  blocking: boolean
+  checkedAt: string
+  providers: Record<string, {
+    state: ProviderState
+    latencyMs: number
+    message: string
+    capabilities?: Record<string, boolean>
+  }>
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  database: 'Turso DB',
+  gemini: 'Gemini',
+  coupang: '쿠팡 Reporting',
+  youtube: 'YouTube OAuth',
+  shotstack: 'Shotstack',
+  tts: 'Google TTS',
+}
+
 type StepItem = { text: string; url?: string }
 type RevenueImpact = 'high' | 'medium' | 'low'
 type ApprovalType = 'instant' | 'review'
@@ -89,11 +111,11 @@ const STEPS: Step[] = [
     description: '실시간 트렌딩 상품 자동 발굴 + 어필리에이트 링크 생성 (수수료 3~7%) — 현재 큐레이션 풀 20개 고정 사용 중, API 연동 시 매일 새 상품 자동 교체',
     revenueImpact: 'high',
     approval: 'instant',
-    envVars: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY'],
+    envVars: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY', 'COUPANG_SUB_ID'],
     steps: [
       { text: '쿠팡 파트너스 로그인', url: 'https://partners.coupang.com' },
       { text: '마이페이지 → API 연동 → 액세스 키 / 시크릿 키 발급 (계정 있으면 즉시 발급)' },
-      { text: 'Vercel에 COUPANG_ACCESS_KEY, COUPANG_SECRET_KEY 추가' },
+      { text: 'Vercel에 COUPANG_ACCESS_KEY, COUPANG_SECRET_KEY 추가 (채널별 추적은 COUPANG_SUB_ID 선택)' },
     ],
   },
   {
@@ -132,6 +154,7 @@ const STEPS: Step[] = [
       { text: 'Google Cloud Console → 프로젝트 생성', url: 'https://console.cloud.google.com' },
       { text: 'YouTube Data API v3 활성화' },
       { text: 'OAuth 2.0 클라이언트 ID 생성 (웹 애플리케이션)' },
+      { text: 'OAuth scope 4개 선택: youtube.upload, youtube.readonly, yt-analytics.readonly, yt-analytics-monetary.readonly' },
       { text: 'Google OAuth Playground에서 Refresh Token 발급', url: 'https://developers.google.com/oauthplayground' },
       { text: 'Vercel에 YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN 추가' },
     ],
@@ -152,7 +175,7 @@ const STEPS: Step[] = [
     steps: [
       { text: 'Shotstack 대시보드 접속', url: 'https://shotstack.io' },
       { text: 'Dashboard → API Keys에서 Production 키 복사' },
-      { text: 'Vercel에 SHOTSTACK_API_KEY 교체 + SHOTSTACK_STAGE=production 추가 (현재: sandbox)' },
+      { text: 'Vercel에 Production 키와 SHOTSTACK_STAGE=v1 설정 (테스트 환경은 stage)' },
     ],
   },
   {
@@ -284,6 +307,9 @@ export default function SetupPage() {
   const [checking, setChecking] = useState(false)
   const [checkResult, setCheckResult] = useState<Record<string, boolean> | null>(null)
   const [setupInfo, setSetupInfo] = useState<{ activeMarkets?: string[]; automationReady?: boolean; videoReady?: boolean; blogReady?: boolean; globalReady?: boolean } | null>(null)
+  const [verifying, setVerifying] = useState(false)
+  const [liveVerification, setLiveVerification] = useState<LiveVerification | null>(null)
+  const [verificationError, setVerificationError] = useState<string | null>(null)
   const [resetting, setResetting] = useState(false)
   const [resetResult, setResetResult] = useState<string | null>(null)
 
@@ -294,11 +320,10 @@ export default function SetupPage() {
     try {
       const res = await fetch('/api/admin/reset-fake-data', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${prompt('CRON_SECRET 값을 입력하세요:') || ''}` },
       })
       const data = await res.json()
       if (res.ok) {
-        setResetResult(`✅ 초기화 완료: revenue_logs ${data.deleted.revenue_logs}건, 콘텐츠 ${data.deleted.content_rows_reset}건, 제품 ${data.deleted.products_reset}건 리셋`)
+        setResetResult(`✅ 초기화 완료: 레거시 수익 ${data.deleted.revenue_logs}건, 콘텐츠 ${data.deleted.content_rows_reset}건, 제품 ${data.deleted.products_reset}건 리셋`)
       } else {
         setResetResult(`❌ 오류: ${data.error}`)
       }
@@ -323,6 +348,22 @@ export default function SetupPage() {
     }
   }
 
+  async function verifyProviders() {
+    setVerifying(true)
+    setVerificationError(null)
+    try {
+      const res = await fetch('/api/setup/verify', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || '운영 키 검증 실패')
+      setLiveVerification(data)
+    } catch (error) {
+      setLiveVerification(null)
+      setVerificationError(error instanceof Error ? error.message : '운영 키 검증 요청에 실패했습니다.')
+    } finally {
+      setVerifying(false)
+    }
+  }
+
   const readyCount = checkResult ? Object.values(checkResult).filter(Boolean).length : 0
   const totalCount = checkResult ? Object.keys(checkResult).length : 0
 
@@ -341,13 +382,22 @@ export default function SetupPage() {
               <p className="font-semibold text-indigo-900">Vercel 환경변수 상태 확인</p>
               <p className="text-sm text-indigo-700 mt-0.5">현재 배포된 환경의 API 키 설정 상태를 실시간으로 확인합니다.</p>
             </div>
-            <button
-              onClick={checkEnv}
-              disabled={checking}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-            >
-              {checking ? '확인 중...' : '상태 확인'}
-            </button>
+            <div className="flex gap-2 flex-shrink-0">
+              <button
+                onClick={checkEnv}
+                disabled={checking || verifying}
+                className="px-3 py-2 bg-white text-indigo-700 border border-indigo-200 rounded-lg text-sm font-medium hover:bg-indigo-100 disabled:opacity-50"
+              >
+                {checking ? '확인 중...' : '설정 확인'}
+              </button>
+              <button
+                onClick={verifyProviders}
+                disabled={checking || verifying}
+                className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {verifying ? '검증 중...' : '운영 키 실검증'}
+              </button>
+            </div>
           </div>
 
           {checkResult && (
@@ -394,6 +444,32 @@ export default function SetupPage() {
                 </div>
               )}
             </>
+          )}
+          {verificationError && <p className="mt-3 text-sm text-red-700">{verificationError}</p>}
+          {liveVerification && (
+            <div className="mt-4 pt-4 border-t border-indigo-200">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-semibold text-indigo-900">공급자 인증 응답</p>
+                <span className="text-[11px] text-indigo-500">{new Date(liveVerification.checkedAt).toLocaleString('ko-KR')}</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {Object.entries(liveVerification.providers).map(([provider, result]) => {
+                  const tone = result.state === 'valid' ? 'bg-green-50 text-green-800 border-green-200'
+                    : result.state === 'partial' ? 'bg-amber-50 text-amber-800 border-amber-200'
+                      : 'bg-red-50 text-red-800 border-red-200'
+                  return (
+                    <div key={provider} className={`rounded-lg border p-2.5 ${tone}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold">{PROVIDER_LABELS[provider] || provider}</span>
+                        <span className="text-[10px] font-mono">{result.state} · {result.latencyMs}ms</span>
+                      </div>
+                      <p className="text-[11px] mt-1">{result.message}</p>
+                    </div>
+                  )
+                })}
+              </div>
+              <p className="text-[11px] text-indigo-600 mt-2">비밀값과 공급자 원문 오류는 표시하지 않습니다.</p>
+            </div>
           )}
         </CardContent>
       </Card>

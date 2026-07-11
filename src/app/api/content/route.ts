@@ -11,7 +11,8 @@ export async function GET(req: NextRequest) {
   const limit = Number(searchParams.get('limit') || 50)
 
   let sql = `
-    SELECT c.*, p.name as product_name, p.category
+    SELECT c.*, p.name as product_name, p.category,
+           COALESCE((SELECT SUM(re.amount) FROM revenue_events re WHERE re.content_id = c.id), 0) AS revenue_from_events
     FROM content c
     JOIN products p ON c.product_id = p.id
     WHERE 1=1
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
 
   if (status) { sql += ' AND c.status = ?'; params.push(status) }
   if (platform) { sql += ' AND c.platform = ?'; params.push(platform) }
-  sql += ' ORDER BY c.revenue DESC LIMIT ?'
+  sql += ' ORDER BY revenue_from_events DESC, c.views DESC, c.created_at DESC LIMIT ?'
   params.push(limit)
 
   const content = await query<Record<string, unknown>>(sql, params)

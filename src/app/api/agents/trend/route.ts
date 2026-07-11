@@ -3,10 +3,10 @@ import { runTrendAgent } from '@/lib/agents/trend-agent'
 
 export async function POST(req: NextRequest) {
   try {
-    const { keyword, category } = await req.json()
+    const { keyword, category, market } = await req.json()
     if (!keyword) return NextResponse.json({ error: '키워드를 입력해 주세요' }, { status: 400 })
 
-    const result = await runTrendAgent(keyword, category)
+    const result = await runTrendAgent(keyword, category, market || 'KR')
     return NextResponse.json(result)
   } catch (e) {
     console.error(e)

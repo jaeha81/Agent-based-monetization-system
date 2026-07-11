@@ -9,14 +9,22 @@ export async function GET(req: NextRequest) {
   const category = searchParams.get('category')
   const limit = Number(searchParams.get('limit') || 20)
 
-  let sql = 'SELECT id, name, category, coupang_url, commission_rate, viral_score, estimated_revenue, created_at FROM products'
+  let sql = `SELECT id, name, category, coupang_url, commission_rate, viral_score,
+                    estimated_revenue, performance_score, total_views, total_clicks,
+                    total_engaged_views,
+                    avg_retention, last_performance_sync_at, created_at
+                    , actual_revenue, total_cost, net_profit, profit_score, selection_score,
+                    decision_confidence, decision_action, decision_reason, decision_updated_at
+                    , market_trend_score, market_trend_reason, market_trend_updated_at,
+                    revenue_data_complete_through
+             FROM products`
   const params: (null | string | number)[] = []
 
   if (category && category !== '전체') {
     sql += ' WHERE category = ?'
     params.push(category)
   }
-  sql += ' ORDER BY viral_score DESC LIMIT ?'
+  sql += " ORDER BY CASE COALESCE(decision_action, 'learn') WHEN 'scale' THEN 0 WHEN 'learn' THEN 1 WHEN 'hold' THEN 2 ELSE 3 END, selection_score DESC, created_at DESC LIMIT ?"
   params.push(limit)
 
   const products = await query<Record<string, unknown>>(sql, params)

@@ -4,11 +4,16 @@ import { runContentAgent } from '@/lib/agents/content-agent'
 import { submitShotstackScenicRender, pollShotstackRender } from '@/lib/shotstack'
 import { generateVideoScenario } from '@/lib/agents/scenario-agent'
 import { generateProductImage, buildProductImagePrompt } from '@/lib/agents/image-agent'
-import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags, postTopComment } from '@/lib/youtube'
+import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags } from '@/lib/youtube'
 import { submitVeoJob, buildVeoPrompt, downloadVeoVideo, pollVeoJob, isVeoRender } from '@/lib/agents/veo-agent'
 import { uploadVideoToBlob, deleteBlob } from '@/lib/blob-storage'
 import { postInstagramReel } from '@/lib/instagram'
 import { postTikTokVideo } from '@/lib/tiktok'
+import { PRIVATE_UPLOAD_STATUS, buildTrackedAffiliateUrl, requireAffiliateUrl } from '@/lib/publishing-safety'
+import { runAutomatedVideoQa } from '@/lib/video-qa'
+import { recordContentCost } from '@/lib/profitability'
+import { refreshProductDecisions, selectProductCandidates } from '@/lib/product-selection'
+import { refreshProductTrendScores } from '@/lib/trend-product-matcher'
 
 // ─── 타입 정의 ───────────────────────────────────────────────────────────────
 
@@ -175,6 +180,8 @@ async function nodeProductDiscovery(
   for (const p of products) {
     const exists = await queryOne<{ id: number }>('SELECT id FROM products WHERE name = ?', [p.productName])
     if (exists) {
+      const aff = await generateAffiliateLink(p.productUrl, p.productId, p.commissionRate)
+      await execute('UPDATE products SET coupang_url = ?, commission_rate = ? WHERE id = ?', [aff.shortUrl, p.commissionRate, exists.id])
       productIds.push(exists.id)
     } else {
       const aff = await generateAffiliateLink(p.productUrl, p.productId, p.commissionRate)
@@ -190,10 +197,17 @@ async function nodeProductDiscovery(
     }
   }
 
-  await completeJob(jobId, { productIds, count: productIds.length, keyword })
+  const market = input.market || 'KR'
+  await refreshProductTrendScores(market)
+  await refreshProductDecisions()
+  const selectedProductIds = await selectProductCandidates(
+    market, 3, `${new Date().toISOString().slice(0, 10)}:${market}:${keyword}`
+  )
+  const productionIds = selectedProductIds.length ? selectedProductIds : productIds.slice(0, 3)
+  await completeJob(jobId, { productIds, selectedProductIds: productionIds, count: productionIds.length, keyword })
 
   // 훅 발동: 각 제품 → content_generation 큐
-  for (const productId of productIds.slice(0, 3)) {
+  for (const productId of productionIds) {
     const childId = await createJob(workflowName, 'content_generation', {
       productId, market: input.market || 'KR', language: input.language || 'ko',
     }, triggerType)
@@ -304,23 +318,32 @@ async function nodeVideoRender(
       if (!hasShotstack) throw veoErr
       console.warn('[Workflow] Veo 실패, Shotstack 폴백:', veoErr instanceof Error ? veoErr.message : String(veoErr))
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
-      const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
-      renderId = await submitShotstackScenicRender(scenario, content.product_name, imageUrl, language, callbackUrl, content.coupang_url || undefined)
+      const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.SHOTSTACK_WEBHOOK_SECRET || ''}`
+      renderId = await submitShotstackScenicRender(scenario, content.product_name, imageUrl, language, callbackUrl, content.coupang_url || undefined, input.contentId)
     }
   } else {
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
-    const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
-    renderId = await submitShotstackScenicRender(scenario, content.product_name, imageUrl, language, callbackUrl, content.coupang_url || undefined)
+    const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.SHOTSTACK_WEBHOOK_SECRET || ''}`
+    renderId = await submitShotstackScenicRender(scenario, content.product_name, imageUrl, language, callbackUrl, content.coupang_url || undefined, input.contentId)
   }
+
+  const renderProvider = isVeoRender(renderId) ? 'veo' : 'shotstack'
+  await execute(
+    `UPDATE content SET render_id = ?, image_url = ?, render_provider = ?,
+     video_width = 1080, video_height = 1920, video_duration_seconds = ? WHERE id = ?`,
+    [renderId, imageUrl, renderProvider, renderProvider === 'shotstack' ? 25 : 8, input.contentId]
+  )
+  await Promise.all([
+    recordContentCost(input.contentId, isVeoRender(renderId) ? 'veo_render' : 'shotstack_render', renderId),
+    recordContentCost(input.contentId, 'llm_content', renderId),
+    recordContentCost(input.contentId, 'tts', renderId),
+    ...(imageUrl ? [recordContentCost(input.contentId, 'image_generation', renderId)] : []),
+  ])
 
   // waiting 상태로 전환 — webhook이 올 때까지 대기
   await execute(
     `UPDATE workflow_jobs SET status = 'waiting', render_id = ? WHERE id = ?`,
     [renderId, jobId]
-  )
-  await execute(
-    `UPDATE content SET render_id = ? WHERE id = ?`,
-    [renderId, input.contentId]
   )
 
   console.log(`[Workflow] Hook: video_render submitted → waiting (render_id: ${renderId}, job ${jobId})`)
@@ -375,26 +398,29 @@ async function nodeYouTubeUpload(
   }
 
   const content = await queryOne<{
-    id: number; hook: string | null; script: string | null
+    id: number; product_id: number; hook: string | null; script: string | null
     product_name: string; category: string; coupang_url: string | null
   }>(
-    `SELECT c.id, c.hook, c.script, p.name as product_name, p.category, p.coupang_url
+    `SELECT c.id, c.product_id, c.hook, c.script, p.name as product_name, p.category, p.coupang_url
      FROM content c JOIN products p ON c.product_id = p.id WHERE c.id = ?`,
     [input.contentId]
   )
   if (!content) throw new Error(`Content ${input.contentId} not found`)
 
   const tags = buildShortsTags(content.product_name, content.category)
-  const affiliateUrl = content.coupang_url || 'https://www.coupang.com'
+  requireAffiliateUrl(content.coupang_url)
+  const affiliateUrl = buildTrackedAffiliateUrl(content.id, content.product_id)
   // @everyday-c 스타일: 훅→링크→해시태그 순서
   const description = buildShortsDescription(content.hook || content.script || '', affiliateUrl, tags)
-  const pinnedComment = `🔥 최저가 링크 → ${affiliateUrl}`
 
   // Veo URI: googleapis.com 또는 base64 data URI — API 키 인증 다운로드 또는 디코딩
   const isVeoUri = input.videoUrl.includes('generativelanguage.googleapis.com') || input.videoUrl.startsWith('data:')
   const videoBuffer = isVeoUri
     ? await downloadVeoVideo(input.videoUrl)
     : Buffer.from(await (await fetch(input.videoUrl)).arrayBuffer())
+
+  const qa = await runAutomatedVideoQa(input.contentId, videoBuffer)
+  if (!qa.passed) throw new Error(`영상 QA 실패: ${JSON.stringify(qa.checks)}`)
 
   const result = await uploadYouTubeShorts({
     title: (content.hook || content.product_name).slice(0, 100),
@@ -404,13 +430,12 @@ async function nodeYouTubeUpload(
     madeForKids: false,
   }, videoBuffer)
 
-  await execute(`UPDATE content SET status = 'posted', posted_at = datetime('now') WHERE id = ?`, [input.contentId])
+  await execute(`UPDATE content SET status = ?, posted_at = NULL WHERE id = ?`, [PRIVATE_UPLOAD_STATUS, input.contentId])
   await execute(
-    `UPDATE scheduled_posts SET youtube_video_id = ?, status = 'published', published_at = datetime('now')
+    `UPDATE scheduled_posts SET youtube_video_id = ?, status = ?, visibility = 'private', published_at = NULL
      WHERE content_id = ? AND platform = 'YouTube'`,
-    [result.videoId, input.contentId]
+    [result.videoId, PRIVATE_UPLOAD_STATUS, input.contentId]
   )
-
   // Blob에 영상 업로드 → Instagram/TikTok 공개 URL 확보
   let blobUrl: string | undefined
   if (process.env.BLOB_READ_WRITE_TOKEN) {
@@ -530,7 +555,7 @@ async function nodeInstagramReel(
     return
   }
 
-  const affiliateUrl = content.coupang_url || 'https://www.coupang.com'
+  const affiliateUrl = requireAffiliateUrl(content.coupang_url)
   const caption = [
     content.hook || content.product_name,
     '',

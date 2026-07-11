@@ -1,19 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { startWorkflow, processPendingJobs } from '@/lib/workflow-engine'
+import { isAdminRequest } from '@/lib/admin-auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
-function isAuthorized(req: NextRequest): boolean {
-  const secret = req.headers.get('authorization')?.replace('Bearer ', '')
-    || req.nextUrl.searchParams.get('secret')
-  return secret === process.env.CRON_SECRET
-}
-
 // POST /api/workflow/run
 // Body: { workflow?: string, trigger?: string, keyword?: string, market?: string }
 export async function POST(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  if (!await isAdminRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -45,7 +40,7 @@ export async function POST(req: NextRequest) {
 
 // GET /api/workflow/run?process=true — 대기 중인 잡 처리
 export async function GET(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  if (!await isAdminRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

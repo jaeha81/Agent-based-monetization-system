@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { queryOne, execute } from '@/lib/db'
 import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags, postTopComment } from '@/lib/youtube'
+import { PRIVATE_UPLOAD_STATUS, buildTrackedAffiliateUrl, requireAffiliateUrl } from '@/lib/publishing-safety'
+import { runAutomatedVideoQa } from '@/lib/video-qa'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -29,13 +31,14 @@ export async function POST(req: NextRequest) {
 
   const content = await queryOne<{
     id: number
+    product_id: number
     hook: string | null
     script: string | null
     product_name: string
     category: string
     coupang_url: string | null
   }>(
-    `SELECT c.id, c.hook, c.script, p.name as product_name, p.category, p.coupang_url
+    `SELECT c.id, c.product_id, c.hook, c.script, p.name as product_name, p.category, p.coupang_url
      FROM content c JOIN products p ON c.product_id = p.id
      WHERE c.id = ? AND c.platform = 'YouTube'`,
     [contentId]
@@ -50,9 +53,15 @@ export async function POST(req: NextRequest) {
 
   try {
     const videoBuffer = Buffer.from(await file.arrayBuffer())
+    await execute(`UPDATE content SET render_provider = 'manual_verified' WHERE id = ?`, [contentId])
+    const qa = await runAutomatedVideoQa(contentId, videoBuffer)
+    if (!qa.passed) {
+      return NextResponse.json({ ok: false, error: '영상 QA 실패', qa }, { status: 422 })
+    }
 
     const tags = buildShortsTags(content.product_name, content.category)
-    const affiliateUrl = content.coupang_url || 'https://www.coupang.com'
+    requireAffiliateUrl(content.coupang_url)
+    const affiliateUrl = buildTrackedAffiliateUrl(content.id, content.product_id)
     const description = buildShortsDescription(
       content.hook || content.script || '',
       affiliateUrl,
@@ -71,15 +80,14 @@ export async function POST(req: NextRequest) {
     )
 
     await execute(
-      `UPDATE content SET status = 'posted', posted_at = datetime('now'), video_url = ? WHERE id = ?`,
-      [result.url, contentId]
+      `UPDATE content SET status = ?, posted_at = NULL, video_url = ? WHERE id = ?`,
+      [PRIVATE_UPLOAD_STATUS, result.url, contentId]
     )
     await execute(
-      `UPDATE scheduled_posts SET youtube_video_id = ?, status = 'published', published_at = datetime('now')
+      `UPDATE scheduled_posts SET youtube_video_id = ?, status = ?, visibility = 'private', published_at = NULL
        WHERE content_id = ? AND platform = 'YouTube'`,
-      [result.videoId, contentId]
+      [result.videoId, PRIVATE_UPLOAD_STATUS, contentId]
     )
-
     try {
       await postTopComment(result.videoId, `🔥 최저가 링크 → ${affiliateUrl}`)
     } catch (commentErr) {
@@ -88,7 +96,7 @@ export async function POST(req: NextRequest) {
 
     console.log(`[VeoUpload] 업로드 완료: contentId=${contentId} videoId=${result.videoId}`)
 
-    return NextResponse.json({ ok: true, videoId: result.videoId, url: result.url })
+    return NextResponse.json({ ok: true, videoId: result.videoId, url: result.url, qa })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[VeoUpload] 실패:', msg)

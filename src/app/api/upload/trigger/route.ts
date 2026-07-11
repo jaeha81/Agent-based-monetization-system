@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { queryOne, execute } from '@/lib/db'
-import { submitShotstackScenicRender, submitShotstackRender } from '@/lib/shotstack'
+import { submitShotstackScenicRender } from '@/lib/shotstack'
 import type { VideoScenario } from '@/lib/agents/scenario-agent'
 import { generateProductImage, buildProductImagePrompt } from '@/lib/agents/image-agent'
 
@@ -10,9 +10,8 @@ export const maxDuration = 60
 // 로컬 에이전트가 content_generation 완료 후 호출하는 엔드포인트
 // 4씬 Shotstack 렌더를 비동기로 제출하고 즉시 반환.
 export async function POST(req: NextRequest) {
-  const auth = req.headers.get('Authorization') || ''
-  const secret = process.env.UPLOAD_SECRET
-  if (!secret || auth !== `Bearer ${secret}`) {
+  const secret = process.env.UPLOAD_SECRET?.trim()
+  if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -54,7 +53,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
-    const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
+    const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.SHOTSTACK_WEBHOOK_SECRET || ''}`
     const language = content.language || 'ko'
     const productName = content.product_name
     const category = content.category || '일반'
@@ -89,17 +88,9 @@ export async function POST(req: NextRequest) {
       pinnedComment: affiliateUrl ? `🛒 최저가 구매 링크: ${affiliateUrl}` : '',
     }
 
-    let renderId: string
-    try {
-      renderId = await submitShotstackScenicRender(scenario, productName, imageUrl, language, callbackUrl, affiliateUrl)
-    } catch (err) {
-      // 4씬 실패 시 단순 렌더로 폴백
-      console.warn('[upload/trigger] 4씬 렌더 실패, 단순 렌더 폴백:', err instanceof Error ? err.message : String(err))
-      renderId = await submitShotstackRender(
-        scenario.hook, productName, language, callbackUrl,
-        scenario.ttsScript, affiliateUrl
-      )
-    }
+    const renderId = await submitShotstackScenicRender(
+      scenario, productName, imageUrl, language, callbackUrl, affiliateUrl, contentId
+    )
 
     console.log(`[upload/trigger] Shotstack 렌더 제출: renderId=${renderId} contentId=${contentId}`)
 
@@ -110,8 +101,10 @@ export async function POST(req: NextRequest) {
       [JSON.stringify({ contentId, language }), contentId, renderId]
     )
     await execute(
-      `UPDATE content SET render_id = ?, render_status = 'rendering' WHERE id = ?`,
-      [renderId, contentId]
+      `UPDATE content SET render_id = ?, render_status = 'rendering', image_url = ?,
+       render_provider = 'shotstack', video_width = 1080, video_height = 1920,
+       video_duration_seconds = 25 WHERE id = ?`,
+      [renderId, imageUrl, contentId]
     )
 
     return NextResponse.json({

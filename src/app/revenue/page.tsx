@@ -9,6 +9,12 @@ interface ManualEntry {
   amount: number
   period: string
   note: string | null
+  external_id: string | null
+  event_type: 'commission' | 'refund' | 'adjustment'
+  currency: string
+  occurred_at: string | null
+  settlement_status: 'pending' | 'settled'
+  product_id: number | null
   created_at: string
 }
 
@@ -22,6 +28,7 @@ interface VideoStat {
 interface ManualData {
   entries: ManualEntry[]
   total: number
+  pendingTotal: number
   byPlatform: Record<string, number>
 }
 
@@ -31,11 +38,16 @@ interface YouTubeData {
     totalRevenue: number
     totalViews: number
     hasMonetization: boolean
+    status: 'ok' | 'missing' | 'auth_error' | 'monetary_scope_unavailable' | 'api_error'
+    currency: 'KRW'
+    dataThrough: string | null
   }
   videoStats: VideoStat[]
   totalViewsFromDb: number
   credentialSet: boolean
 }
+
+interface ProductOption { id: number; name: string }
 
 const SOURCE_OPTIONS: Record<string, string[]> = {
   '쿠팡 파트너스': ['쿠팡 파트너스 수수료', '쿠팡 로켓배송 보너스', '쿠팡 전환 보너스'],
@@ -46,24 +58,34 @@ const SOURCE_OPTIONS: Record<string, string[]> = {
 export default function RevenuePage() {
   const [manualData, setManualData] = useState<ManualData | null>(null)
   const [youtubeData, setYoutubeData] = useState<YouTubeData | null>(null)
+  const [products, setProducts] = useState<ProductOption[]>([])
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
   const [form, setForm] = useState({
     platform: '쿠팡 파트너스',
     source: '쿠팡 파트너스 수수료',
     amount: '',
     period: new Date().toISOString().slice(0, 7),
     note: '',
+    productId: '',
+    externalId: '',
+    eventType: 'commission' as 'commission' | 'refund' | 'adjustment',
+    settlementStatus: 'settled' as 'pending' | 'settled',
+    occurredAt: new Date().toISOString().slice(0, 10),
+    dataCompleteThrough: '',
   })
   const [activeTab, setActiveTab] = useState<'coupang' | 'youtube'>('coupang')
 
   const fetchData = useCallback(async () => {
-    const [manual, youtube] = await Promise.all([
+    const [manual, youtube, productRows] = await Promise.all([
       fetch('/api/revenue/manual').then(r => r.json()),
       fetch('/api/revenue/youtube?days=30').then(r => r.json()),
+      fetch('/api/products?limit=100').then(r => r.json()),
     ])
     setManualData(manual)
     setYoutubeData(youtube)
+    setProducts(productRows)
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -71,17 +93,23 @@ export default function RevenuePage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
+    setFormError(null)
     try {
       const res = await fetch('/api/revenue/manual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, amount: parseInt(form.amount) }),
+        body: JSON.stringify({ ...form, amount: parseInt(form.amount), productId: form.productId ? parseInt(form.productId) : undefined }),
       })
       if (res.ok) {
         setShowForm(false)
-        setForm(f => ({ ...f, amount: '', note: '' }))
+        setForm(f => ({ ...f, amount: '', note: '', productId: '', externalId: '', dataCompleteThrough: '' }))
         await fetchData()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setFormError(data.error || '정산 데이터 저장에 실패했습니다.')
       }
+    } catch {
+      setFormError('정산 데이터 저장 요청에 실패했습니다.')
     } finally {
       setSaving(false)
     }
@@ -94,17 +122,18 @@ export default function RevenuePage() {
   }
 
   const totalManual = manualData?.total ?? 0
+  const pendingTotal = manualData?.pendingTotal ?? 0
   const coupangTotal = manualData?.byPlatform['쿠팡 파트너스'] ?? 0
+  const youtubeSettled = manualData?.byPlatform['YouTube AdSense'] ?? 0
   const ytAnalyticsRevenue = youtubeData?.analytics.totalRevenue ?? 0
   const ytTotalViews = youtubeData?.totalViewsFromDb ?? 0
-  const grandTotal = totalManual + ytAnalyticsRevenue
 
   return (
     <div className="space-y-6 max-w-6xl">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold">수익 관리</h2>
-          <p className="text-sm text-gray-500 mt-0.5">쿠팡 파트너스 + YouTube AdSense 실제 수익 현황</p>
+          <p className="text-sm text-gray-500 mt-0.5">확정 정산과 API 미확정 실적을 분리해 추적합니다.</p>
         </div>
         <button
           onClick={() => setShowForm(true)}
@@ -115,10 +144,12 @@ export default function RevenuePage() {
       </div>
 
       {/* KPI 요약 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KPICard label="총 수익 합계" value={`${(grandTotal / 10000).toFixed(0)}만원`} sub="수동 입력 기준" color="yellow" />
-        <KPICard label="쿠팡 파트너스" value={`${(coupangTotal / 10000).toFixed(0)}만원`} sub="누적 수수료" color="orange" />
-        <KPICard label="YouTube 광고" value={ytAnalyticsRevenue > 0 ? `${(ytAnalyticsRevenue / 10000).toFixed(0)}만원` : '미연동'} sub={youtubeData?.analytics.hasMonetization ? '최근 30일' : '수익창출 미적용'} color="red" />
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <KPICard label="확정 정산 합계" value={`${totalManual.toLocaleString()}원`} sub="settled만 합산" color="yellow" />
+        <KPICard label="쿠팡 확정" value={`${coupangTotal.toLocaleString()}원`} sub="확인된 정산액" color="orange" />
+        <KPICard label="YouTube 확정" value={`${youtubeSettled.toLocaleString()}원`} sub="확인된 지급액" color="red" />
+        <KPICard label="미확정 API 실적" value={`${pendingTotal.toLocaleString()}원`} sub="pending · 합계 제외" color="orange" />
+        <KPICard label="YouTube 추정" value={youtubeData?.analytics.status === 'ok' ? `${ytAnalyticsRevenue.toLocaleString()}원` : '확인 필요'} sub={youtubeData?.analytics.dataThrough ? `${youtubeData.analytics.dataThrough}까지` : '최근 30일'} color="red" />
         <KPICard label="YouTube 조회수" value={ytTotalViews > 0 ? `${(ytTotalViews / 10000).toFixed(1)}만회` : '0'} sub="게시 영상 누계" color="blue" />
       </div>
 
@@ -172,8 +203,9 @@ export default function RevenuePage() {
                       <th className="px-5 py-3 font-medium">플랫폼</th>
                       <th className="px-5 py-3 font-medium">항목</th>
                       <th className="px-5 py-3 font-medium">정산 기간</th>
+                      <th className="px-5 py-3 font-medium">상태</th>
                       <th className="px-5 py-3 font-medium text-right">금액</th>
-                      <th className="px-5 py-3 font-medium">메모</th>
+                      <th className="px-5 py-3 font-medium">근거</th>
                       <th className="px-5 py-3 font-medium"></th>
                     </tr>
                   </thead>
@@ -185,10 +217,19 @@ export default function RevenuePage() {
                         </td>
                         <td className="px-5 py-3 text-gray-700">{e.source}</td>
                         <td className="px-5 py-3 text-gray-500">{e.period}</td>
-                        <td className="px-5 py-3 text-right font-semibold text-yellow-600">
-                          {e.amount >= 10000 ? `${(e.amount / 10000).toFixed(0)}만원` : `${e.amount.toLocaleString()}원`}
+                        <td className="px-5 py-3">
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${e.settlement_status === 'settled' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {e.settlement_status === 'settled' ? '확정' : '미확정'}
+                          </span>
+                          <span className="block text-[10px] text-gray-400 mt-1">{e.event_type}</span>
                         </td>
-                        <td className="px-5 py-3 text-gray-400 text-xs">{e.note || '-'}</td>
+                        <td className="px-5 py-3 text-right font-semibold text-yellow-600">
+                          {e.amount.toLocaleString()}원
+                        </td>
+                        <td className="px-5 py-3 text-gray-400 text-xs">
+                          <span className="block">{e.note || '-'}</span>
+                          {e.external_id && <span className="block font-mono text-[10px] mt-0.5">{e.external_id}</span>}
+                        </td>
                         <td className="px-5 py-3">
                           <button
                             onClick={() => handleDelete(e.id)}
@@ -202,7 +243,7 @@ export default function RevenuePage() {
                   </tbody>
                   <tfoot>
                     <tr className="bg-orange-50 border-t border-orange-100">
-                      <td colSpan={3} className="px-5 py-3 font-semibold text-gray-700">합계</td>
+                      <td colSpan={4} className="px-5 py-3 font-semibold text-gray-700">확정 정산 합계</td>
                       <td className="px-5 py-3 text-right font-bold text-orange-700 text-base">
                         {totalManual >= 10000 ? `${(totalManual / 10000).toFixed(0)}만원` : `${totalManual.toLocaleString()}원`}
                       </td>
@@ -222,13 +263,17 @@ export default function RevenuePage() {
           {/* AdSense 상태 */}
           {youtubeData && !youtubeData.analytics.hasMonetization && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-              <p className="text-sm font-semibold text-blue-800 mb-1">YouTube AdSense 수익 조회 안내</p>
+              <p className="text-sm font-semibold text-blue-800 mb-1">
+                {youtubeData.analytics.status === 'auth_error' ? 'YouTube OAuth 인증 실패'
+                  : youtubeData.analytics.status === 'api_error' ? 'YouTube Analytics 응답 오류'
+                    : youtubeData.analytics.status === 'missing' ? 'YouTube OAuth 미설정'
+                      : 'YouTube 수익 scope 또는 수익창출 상태 확인 필요'}
+              </p>
               <ol className="text-xs text-blue-700 space-y-1 list-decimal list-inside">
                 <li>YouTube Studio → 수익 창출 메뉴에서 AdSense 계정 연결 필요</li>
-                <li>구독자 500명 + 최근 90일 조회수 3,000시간 이상 시 수익 창출 신청 가능</li>
                 <li>OAuth 갱신 시 <code className="bg-blue-100 px-1 rounded">yt-analytics-monetary.readonly</code> 스코프 추가 필요</li>
               </ol>
-              <p className="text-xs text-blue-600 mt-2">현재는 실제 업로드된 영상의 조회수만 추적됩니다.</p>
+              <p className="text-xs text-blue-600 mt-2">무효 토큰과 수익 미적용 상태를 같은 0원으로 처리하지 않습니다.</p>
             </div>
           )}
 
@@ -240,7 +285,7 @@ export default function RevenuePage() {
                   ? `${(ytAnalyticsRevenue / 10000).toFixed(1)}만원`
                   : '0원'}
               </p>
-              <p className="text-xs text-red-500 mt-1">※ 1USD = 1,380원 기준 추정치. 실제 지급액과 다를 수 있습니다.</p>
+              <p className="text-xs text-red-500 mt-1">※ YouTube Analytics가 KRW로 반환한 추정치이며 월말 조정·실제 지급액과 다를 수 있습니다.</p>
             </div>
           )}
 
@@ -345,6 +390,31 @@ export default function RevenuePage() {
                   required
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1 block">이벤트 유형</label>
+                  <select
+                    value={form.eventType}
+                    onChange={e => setForm(f => ({ ...f, eventType: e.target.value as typeof f.eventType }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="commission">수익</option>
+                    <option value="refund">취소·환불</option>
+                    <option value="adjustment">조정</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1 block">정산 상태</label>
+                  <select
+                    value={form.settlementStatus}
+                    onChange={e => setForm(f => ({ ...f, settlementStatus: e.target.value as typeof f.settlementStatus }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="settled">확정 지급</option>
+                    <option value="pending">미확정 실적</option>
+                  </select>
+                </div>
+              </div>
               <div>
                 <label className="text-xs font-medium text-gray-700 mb-1 block">금액 (원)</label>
                 <input
@@ -356,7 +426,55 @@ export default function RevenuePage() {
                   required
                   min="1"
                 />
+                <p className="text-[11px] text-gray-400 mt-1">취소·환불은 양수로 입력해도 음수로 저장됩니다.</p>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1 block">발생일</label>
+                  <input
+                    type="date"
+                    value={form.occurredAt}
+                    onChange={e => setForm(f => ({ ...f, occurredAt: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1 block">외부 거래 ID</label>
+                  <input
+                    type="text"
+                    value={form.externalId}
+                    onChange={e => setForm(f => ({ ...f, externalId: e.target.value }))}
+                    placeholder="중복 방지용"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                    maxLength={128}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-700 mb-1 block">수익 귀속 상품</label>
+                <select
+                  value={form.productId}
+                  onChange={e => setForm(f => ({ ...f, productId: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                >
+                  <option value="">공통 수익 · 상품 미지정</option>
+                  {products.map(product => <option key={product.id} value={product.id}>{product.name}</option>)}
+                </select>
+                <p className="text-[11px] text-gray-400 mt-1">상품을 선택해야 순이익 자가루프에 반영됩니다.</p>
+              </div>
+              {form.settlementStatus === 'settled' && form.productId && (
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1 block">정산 명세 완결일</label>
+                  <input
+                    type="date"
+                    value={form.dataCompleteThrough}
+                    onChange={e => setForm(f => ({ ...f, dataCompleteThrough: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1">이 날짜까지 취소·반품이 반영됐다고 확인한 경우에만 입력하세요.</p>
+                </div>
+              )}
               <div>
                 <label className="text-xs font-medium text-gray-700 mb-1 block">메모 (선택)</label>
                 <input
@@ -367,6 +485,7 @@ export default function RevenuePage() {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
                 />
               </div>
+              {formError && <p className="text-sm text-red-600">{formError}</p>}
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"

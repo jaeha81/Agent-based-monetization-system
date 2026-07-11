@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { queryOne, execute } from '@/lib/db'
 import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags } from '@/lib/youtube'
+import { PRIVATE_UPLOAD_STATUS, buildTrackedAffiliateUrl, requireAffiliateUrl } from '@/lib/publishing-safety'
+import { runAutomatedVideoQa } from '@/lib/video-qa'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -13,7 +15,7 @@ export async function POST(req: NextRequest) {
     }
 
     const content = await queryOne<{
-      id: number; hook: string; script: string
+      id: number; product_id: number; hook: string; script: string
       product_name: string; category: string; coupang_url: string | null
     }>(
       `SELECT c.*, p.name as product_name, p.category, p.coupang_url
@@ -26,7 +28,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '콘텐츠를 찾을 수 없습니다.' }, { status: 404 })
     }
 
-    const affiliateUrl = content.coupang_url || `https://coupang.com`
+    requireAffiliateUrl(content.coupang_url)
+    const affiliateUrl = buildTrackedAffiliateUrl(content.id, content.product_id)
     const tags = buildShortsTags(content.product_name, content.category)
     const description = buildShortsDescription(content.script || '', affiliateUrl, tags)
 
@@ -53,6 +56,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '영상 URL이 필요합니다.' }, { status: 400 })
     }
 
+    const qa = await runAutomatedVideoQa(contentId, videoBuffer)
+    if (!qa.passed) return NextResponse.json({ ok: false, error: '영상 QA 실패', qa }, { status: 422 })
+
     const result = await uploadYouTubeShorts(
       {
         title: content.hook?.slice(0, 100) || content.product_name,
@@ -64,16 +70,15 @@ export async function POST(req: NextRequest) {
     )
 
     await execute(
-      `UPDATE content SET status = 'posted', posted_at = datetime('now') WHERE id = ?`,
-      [contentId]
+      `UPDATE content SET status = ?, posted_at = NULL WHERE id = ?`,
+      [PRIVATE_UPLOAD_STATUS, contentId]
     )
     await execute(
-      `UPDATE scheduled_posts SET status = 'published', youtube_video_id = ?, published_at = datetime('now')
+      `UPDATE scheduled_posts SET status = ?, youtube_video_id = ?, visibility = 'private', published_at = NULL
        WHERE content_id = ? AND platform = 'YouTube'`,
-      [result.videoId, contentId]
+      [PRIVATE_UPLOAD_STATUS, result.videoId, contentId]
     )
-
-    return NextResponse.json({ ok: true, ...result })
+    return NextResponse.json({ ok: true, ...result, qa })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ ok: false, error: msg }, { status: 500 })

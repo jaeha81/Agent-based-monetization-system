@@ -1,24 +1,49 @@
 import crypto from 'crypto'
 
 const BASE_URL = 'https://api-gateway.coupang.com'
-const ACCESS_KEY = process.env.COUPANG_ACCESS_KEY || ''
-const SECRET_KEY = process.env.COUPANG_SECRET_KEY || ''
-const CHANNEL_ID = process.env.COUPANG_CHANNEL_ID || ''
+const API_PREFIX = '/v2/providers/affiliate_open_api/apis/openapi/v1'
+
+function getCredentials(): { accessKey: string; secretKey: string } {
+  return {
+    accessKey: (process.env.COUPANG_ACCESS_KEY || '').replace(/^﻿/, '').trim(),
+    secretKey: (process.env.COUPANG_SECRET_KEY || '').replace(/^﻿/, '').trim(),
+  }
+}
 
 function generateHmacSignature(
   method: string,
   path: string,
   query: string,
-  datetime: string
+  datetime: string,
+  secretKey: string
 ): string {
   const message = datetime + method + path + query
-  return crypto.createHmac('sha256', SECRET_KEY).update(message).digest('hex')
+  return crypto.createHmac('sha256', secretKey).update(message).digest('hex')
 }
 
 function buildAuthHeader(method: string, path: string, query: string): string {
-  const datetime = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z'
-  const signature = generateHmacSignature(method, path, query, datetime)
-  return `CEA algorithm=HmacSHA256, access-key=${ACCESS_KEY}, signed-date=${datetime}, signature=${signature}`
+  const { accessKey, secretKey } = getCredentials()
+  if (!accessKey || !secretKey) throw new Error('쿠팡 API 자격증명이 설정되지 않았습니다.')
+  const datetime = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '').slice(2)
+  const signature = generateHmacSignature(method, path, query, datetime, secretKey)
+  return `CEA algorithm=HmacSHA256, access-key=${accessKey}, signed-date=${datetime}, signature=${signature}`
+}
+
+async function coupangRequest<T>(path: string, query = '', init?: RequestInit): Promise<T> {
+  const method = init?.method || 'GET'
+  const authorization = buildAuthHeader(method, path, query)
+  const response = await fetch(`${BASE_URL}${path}${query ? `?${query}` : ''}`, {
+    ...init,
+    headers: {
+      Authorization: authorization,
+      'Content-Type': 'application/json',
+      ...init?.headers,
+    },
+  })
+  if (!response.ok) throw new Error(`쿠팡 API 요청 실패 (${response.status})`)
+  const payload = await response.json() as { rCode?: string | number; rMessage?: string } & T
+  if (String(payload.rCode ?? '0') !== '0') throw new Error(`쿠팡 API 응답 오류 (${payload.rCode})`)
+  return payload
 }
 
 export interface CoupangProduct {
@@ -41,47 +66,59 @@ export interface AffiliateLink {
   commissionRate: number
 }
 
+export interface CoupangRevenueReportRow {
+  date: string | number
+  orderDate?: string | number
+  trackingCode?: string
+  subId?: string
+  orderId: string | number
+  productId: string | number
+  productName: string
+  quantity?: number
+  gmv?: number
+  commissionRate?: number
+  commission: number
+  categoryName?: string
+}
+
+export interface CoupangRevenueReports {
+  orders: CoupangRevenueReportRow[]
+  cancels: CoupangRevenueReportRow[]
+}
+
 export async function searchTrendingProducts(
   keyword: string,
   limit = 5
 ): Promise<CoupangProduct[]> {
-  if (!ACCESS_KEY || !SECRET_KEY) {
-    return getCuratedProducts(keyword, limit)
+  const { accessKey, secretKey } = getCredentials()
+  if (!accessKey || !secretKey) {
+    if (process.env.USE_MOCK_DATA === 'true') return getCuratedProducts(keyword, limit)
+    throw new Error('쿠팡 상품 발굴 중단: COUPANG_ACCESS_KEY와 COUPANG_SECRET_KEY가 필요합니다.')
   }
 
-  const path = '/v2/providers/affiliate_open_api/apis/openapi/products/search'
-  const query = `keyword=${encodeURIComponent(keyword)}&limit=${limit}`
-  const auth = buildAuthHeader('GET', path, query)
+  const path = `${API_PREFIX}/products/search`
+  const params = new URLSearchParams({ keyword, limit: String(Math.max(1, Math.min(limit, 10))) })
+  const subId = (process.env.COUPANG_SUB_ID || '').trim()
+  if (subId) params.set('subId', subId)
+  const query = params.toString()
 
   try {
-    const res = await fetch(`${BASE_URL}${path}?${query}`, {
-      headers: {
-        Authorization: auth,
-        'Content-Type': 'application/json',
-      },
-    })
-
-    if (!res.ok) {
-      console.error('[Coupang] Search failed:', res.status, await res.text())
-      return getCuratedProducts(keyword, limit)
-    }
-
-    const data = await res.json()
+    const data = await coupangRequest<{ data?: { productData?: Array<Record<string, unknown>> } }>(path, query)
     return (data.data?.productData || []).map((p: Record<string, unknown>) => ({
       productId: p.productId as number,
       productName: p.productName as string,
       productImage: p.productImage as string,
       productUrl: p.productUrl as string,
-      originalPrice: p.originalPrice as number,
-      salePrice: p.salePrice as number,
-      categoryName: p.categoryName as string,
-      rating: p.rating as number,
-      ratingCount: p.ratingCount as number,
-      commissionRate: getCategoryCommissionRate(p.categoryName as string),
+      originalPrice: Number(p.originalPrice || p.productPrice || 0),
+      salePrice: Number(p.salePrice || p.productPrice || 0),
+      categoryName: String(p.categoryName || ''),
+      rating: Number(p.rating || 0),
+      ratingCount: Number(p.ratingCount || 0),
+      commissionRate: getCategoryCommissionRate(String(p.categoryName || '')),
     }))
   } catch (err) {
-    console.error('[Coupang] Error:', err)
-    return getCuratedProducts(keyword, limit)
+    console.error('[Coupang] 상품 검색 실패:', err instanceof Error ? err.message : 'unknown')
+    throw err
   }
 }
 
@@ -90,49 +127,90 @@ export async function generateAffiliateLink(
   productId: number,
   commissionRate = 3.0
 ): Promise<AffiliateLink> {
-  if (!ACCESS_KEY || !SECRET_KEY) {
-    // 채널 ID로 실제 추적 링크 생성 (API 키 불필요)
-    const trackedUrl = CHANNEL_ID
-      ? `https://link.coupang.com/a/${CHANNEL_ID}?url=${encodeURIComponent(productUrl)}`
-      : productUrl
-    return {
-      productId,
-      shortUrl: trackedUrl,
-      originalUrl: productUrl,
-      commissionRate,
-    }
+  const { accessKey, secretKey } = getCredentials()
+  if (!accessKey || !secretKey) {
+    throw new Error('쿠팡 딥링크 생성 중단: 파트너스 API 키가 필요합니다.')
   }
 
-  const path = '/v2/providers/affiliate_open_api/apis/openapi/deeplink'
-  const body = JSON.stringify({ coupangUrls: [productUrl] })
-  const auth = buildAuthHeader('POST', path, '')
+  const path = `${API_PREFIX}/deeplink`
+  const subId = (process.env.COUPANG_SUB_ID || '').trim()
+  const body = JSON.stringify({ coupangUrls: [productUrl], ...(subId ? { subId } : {}) })
 
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
+    const data = await coupangRequest<{ data?: Array<{ shortenUrl?: string; originalUrl?: string }> }>(path, '', {
       method: 'POST',
-      headers: {
-        Authorization: auth,
-        'Content-Type': 'application/json',
-      },
       body,
     })
-
-    if (!res.ok) {
-      console.error('[Coupang] Deeplink failed:', res.status)
-      return { productId, shortUrl: productUrl, originalUrl: productUrl, commissionRate: 3.0 }
-    }
-
-    const data = await res.json()
     const link = data.data?.[0]
     return {
       productId,
-      shortUrl: link?.shortenUrl || productUrl,
+      shortUrl: link?.shortenUrl || (() => { throw new Error('쿠팡 딥링크 응답에 shortenUrl이 없습니다.') })(),
       originalUrl: productUrl,
-      commissionRate: getCategoryCommissionRate(''),
+      commissionRate,
     }
   } catch (err) {
-    console.error('[Coupang] Deeplink error:', err)
-    return { productId, shortUrl: productUrl, originalUrl: productUrl, commissionRate: 3.0 }
+    console.error('[Coupang] 딥링크 생성 실패:', err instanceof Error ? err.message : 'unknown')
+    throw err
+  }
+}
+
+function toReportDate(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('쿠팡 리포트 날짜는 YYYY-MM-DD 형식이어야 합니다.')
+  return value.replace(/-/g, '')
+}
+
+async function fetchRevenueReport(
+  type: 'orders' | 'cancels',
+  startDate: string,
+  endDate: string
+): Promise<CoupangRevenueReportRow[]> {
+  const path = `${API_PREFIX}/reports/${type}`
+  const rows: CoupangRevenueReportRow[] = []
+  const subId = (process.env.COUPANG_SUB_ID || '').trim()
+
+  for (let page = 0; page < 10; page++) {
+    const params = new URLSearchParams({
+      startDate: toReportDate(startDate),
+      endDate: toReportDate(endDate),
+      page: String(page),
+    })
+    if (subId) params.set('subId', subId)
+    const payload = await coupangRequest<{ data?: CoupangRevenueReportRow[] }>(path, params.toString())
+    const pageRows = Array.isArray(payload.data) ? payload.data : []
+    rows.push(...pageRows)
+    if (pageRows.length < 1000) break
+  }
+
+  return rows
+}
+
+export async function getCoupangRevenueReports(startDate: string, endDate: string): Promise<CoupangRevenueReports> {
+  const from = new Date(`${startDate}T00:00:00Z`)
+  const to = new Date(`${endDate}T00:00:00Z`)
+  const days = Math.floor((to.getTime() - from.getTime()) / 86_400_000)
+  if (!Number.isFinite(days) || days < 0 || days > 30) {
+    throw new Error('쿠팡 리포트 조회 기간은 최대 31일입니다.')
+  }
+  const [orders, cancels] = await Promise.all([
+    fetchRevenueReport('orders', startDate, endDate),
+    fetchRevenueReport('cancels', startDate, endDate),
+  ])
+  return { orders, cancels }
+}
+
+export async function verifyCoupangCredentials(): Promise<{ ok: boolean; reports: boolean; reason?: string }> {
+  const { accessKey, secretKey } = getCredentials()
+  if (!accessKey || !secretKey) return { ok: false, reports: false, reason: 'missing' }
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+  try {
+    await fetchRevenueReport('orders', yesterday, yesterday)
+    return { ok: true, reports: true }
+  } catch (error) {
+    return {
+      ok: false,
+      reports: false,
+      reason: error instanceof Error && /\((401|403)\)/.test(error.message) ? 'invalid' : 'unavailable',
+    }
   }
 }
 

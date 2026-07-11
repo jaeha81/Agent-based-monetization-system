@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { execute, queryOne } from '@/lib/db'
+import { isAdminRequest } from '@/lib/admin-auth'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-function isAuthorized(req: NextRequest): boolean {
-  const secret = req.headers.get('authorization')?.replace('Bearer ', '')
-    || req.nextUrl.searchParams.get('secret')
-  return secret === process.env.CRON_SECRET
-}
 
 // PATCH /api/products/[id]/approve
 // Body: { approved: true } or { approved: false }
@@ -17,7 +12,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  if (!isAuthorized(req)) {
+  if (!await isAdminRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -57,7 +52,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  if (!isAuthorized(req)) {
+  if (!await isAdminRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

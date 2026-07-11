@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { startWorkflow, processPendingJobs, pollWaitingVideoRenders } from '@/lib/workflow-engine'
 import { runBrainScan } from '@/lib/agent-brain'
+import { syncYouTubeMarketTrends } from '@/lib/market-trends'
+import { refreshProductTrendScores } from '@/lib/trend-product-matcher'
+import { getActiveMarkets } from '@/lib/markets'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
 function isAuthorized(req: NextRequest): boolean {
-  const secret = req.headers.get('authorization')?.replace('Bearer ', '')
-  return secret === process.env.CRON_SECRET
+  const secret = process.env.CRON_SECRET?.trim()
+  return !!secret && req.headers.get('authorization') === `Bearer ${secret}`
 }
 
 export async function GET(req: NextRequest) {
@@ -19,6 +22,14 @@ export async function GET(req: NextRequest) {
   const started = Date.now()
 
   try {
+    const marketTrends = await Promise.all(getActiveMarkets().map(async market => ({ market, result: await syncYouTubeMarketTrends(market).catch(error => {
+      console.error('[Cron/Daily] 시장 트렌드 수집 오류:', error)
+      return { videos: 0, keywords: [] }
+    }) })))
+    const trendMatchedProducts = await refreshProductTrendScores().catch(error => {
+      console.error('[Cron/Daily] 상품-시장 트렌드 매칭 오류:', error)
+      return 0
+    })
     // 0. 이전 run에서 waiting 상태로 남은 렌더 잡 정리 (어제 미완료 건)
     //    YouTube 업로드 자격증명(3키) 완비 시에만 폴링 — 불완전 시 완성 렌더 소비→업로드 실패→유실 방지
     const canUpload = !!(process.env.YOUTUBE_CLIENT_ID && process.env.YOUTUBE_CLIENT_SECRET && process.env.YOUTUBE_REFRESH_TOKEN)
@@ -40,7 +51,7 @@ export async function GET(req: NextRequest) {
 
     const elapsed = ((Date.now() - started) / 1000).toFixed(1)
     console.log(`[Cron/Daily] 완료 — ${elapsed}s rootJob=${result.rootJobId}`)
-    return NextResponse.json({ ok: true, elapsed: `${elapsed}s`, drained, prevResumed, ...result })
+    return NextResponse.json({ ok: true, elapsed: `${elapsed}s`, drained, prevResumed, marketTrends, trendMatchedProducts, ...result })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[Cron/Daily] 오류:', msg)

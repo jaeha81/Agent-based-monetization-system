@@ -4,42 +4,22 @@ import { queryOne, execute, query } from '@/lib/db'
 import { pollShotstackRender } from '@/lib/shotstack'
 import { pollVeoJob, isVeoRender } from '@/lib/agents/veo-agent'
 import { resumeVideoRenderJob, processPendingJobs } from '@/lib/workflow-engine'
+import { isAdminRequest } from '@/lib/admin-auth'
+import { verifyProductionProviders } from '@/lib/provider-verification'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-interface AutofixResponse {
-  ok: boolean
-  cycle: number
-  scanned: number
-  fixed: number
-  remaining: number
-  renderResumed: number
-  processedQueued: number
-  shotstackKeyValid: boolean
-  log: string[]
-  elapsedMs: number
-}
-
 // Shotstack API 키 유효성 검증
 async function validateShotstackKey(): Promise<boolean> {
-  try {
-    const key = process.env.SHOTSTACK_API_KEY?.replace(/^﻿/, '').trim()
-    const stage = process.env.SHOTSTACK_STAGE === 'v1' ? 'v1' : 'stage'
-    const authRes = await fetch(
-      `https://api.shotstack.io/${stage}/render/health-check-probe`,
-      { headers: { 'x-api-key': key || '' } }
-    )
-    return authRes.status !== 401 && authRes.status !== 403
-  } catch {
-    // 네트워크 오류는 키 무효로 간주하지 않음 (API 자체 문제일 수 있음)
-    return true
-  }
+  const result = await verifyProductionProviders(['shotstack'])
+  return result.shotstack?.state === 'valid' || result.shotstack?.state === 'partial'
 }
 
 // POST /api/agent/autofix — 자율 자가수리 루프 1회 실행
-export async function POST(): Promise<NextResponse<AutofixResponse>> {
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  if (!await isAdminRequest(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const startMs = Date.now()
   const log: string[] = []
 
@@ -239,11 +219,9 @@ export async function POST(): Promise<NextResponse<AutofixResponse>> {
   }
 }
 
-// GET /api/agent/autofix — Vercel Cron 전용 (매시간, CRON_SECRET 인증)
+// GET /api/agent/autofix — 관리자 수동 복구 실행
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const auth = req.headers.get('Authorization') || ''
-  const secret = process.env.CRON_SECRET?.trim()
-  if (!secret || auth !== `Bearer ${secret}`) {
+  if (!await isAdminRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

@@ -21,12 +21,20 @@ export async function POST(req: NextRequest) {
   const timestamp = req.headers.get('x-signature-timestamp') ?? ''
   const rawBody = await req.text()
 
+  const timestampSeconds = Number(timestamp)
+  if (!Number.isFinite(timestampSeconds) || Math.abs(Date.now() / 1000 - timestampSeconds) > 5 * 60) {
+    return new NextResponse('Expired request', { status: 401 })
+  }
+
   const publicKey = process.env.SHORTS_DISCORD_PUBLIC_KEY ?? ''
   if (!publicKey || !verifyDiscordSignature(publicKey, signature, timestamp, rawBody)) {
     return new NextResponse('Invalid signature', { status: 401 })
   }
 
   const interaction: DiscordInteraction = JSON.parse(rawBody)
+  if (process.env.SHORTS_DISCORD_GUILD_ID && interaction.guild_id !== process.env.SHORTS_DISCORD_GUILD_ID) {
+    return new NextResponse('Unauthorized guild', { status: 403 })
+  }
 
   // PING — Discord health check
   if (interaction.type === 1) {
@@ -38,6 +46,11 @@ export async function POST(req: NextRequest) {
     const cmd = interaction.data.name
 
     if (cmd === '실행') {
+      const userId = interaction.member?.user.id || interaction.user?.id || ''
+      const allowedUsers = (process.env.SHORTS_DISCORD_ADMIN_USER_IDS || '').split(',').map(value => value.trim()).filter(Boolean)
+      if (allowedUsers.length === 0 || !allowedUsers.includes(userId)) {
+        return NextResponse.json({ type: 4, data: { content: '자동화 실행 권한이 없습니다.', flags: 64 } })
+      }
       const token = interaction.token
       const appId = process.env.SHORTS_DISCORD_APPLICATION_ID ?? ''
 

@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:production": "npm run verify:production && next build",
+    "verify:production": "node scripts/verify-production-readiness.mjs",
     "start": "next start",
     "lint": "next lint"
   },

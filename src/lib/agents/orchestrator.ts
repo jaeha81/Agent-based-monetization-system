@@ -3,6 +3,8 @@ import { runContentAgent } from './content-agent'
 import { runEvolutionAgent, getLatestStrategy } from './evolution-agent'
 import { publishScheduledPosts } from '@/lib/automation-engine'
 import { searchTrendingProducts, generateAffiliateLink } from '@/lib/coupang'
+import { refreshProductDecisions, selectProductCandidates } from '@/lib/product-selection'
+import { refreshProductTrendScores } from '@/lib/trend-product-matcher'
 
 export type AgentName =
   | 'trend_agent'
@@ -98,8 +100,8 @@ export async function runFullCycle(): Promise<OrchestratorResult> {
       if (!exists) {
         const aff = await generateAffiliateLink(p.productUrl, p.productId, p.commissionRate)
         const { lastInsertRowid } = await execute(
-          `INSERT INTO products (name, category, coupang_url, commission_rate, viral_score, estimated_revenue)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO products (name, category, coupang_url, commission_rate, viral_score, estimated_revenue, target_market)
+           VALUES (?, ?, ?, ?, ?, ?, 'KR')`,
           [p.productName, p.categoryName, aff.shortUrl, p.commissionRate,
             0,
             0]
@@ -110,10 +112,21 @@ export async function runFullCycle(): Promise<OrchestratorResult> {
 
     // 기존 고성과 제품도 추가
     if (newProductIds.length < 3) {
-      const top = await query<{ id: number }>(
-        `SELECT id FROM products WHERE approved IS NOT 0 ORDER BY viral_score DESC LIMIT 5`
+      const exploit = await query<{ id: number }>(
+        `SELECT id FROM products
+         WHERE approved IS NOT 0 AND NOT (total_views >= 500 AND profit_score < -20)
+         ORDER BY CASE WHEN actual_revenue > 0 THEN profit_score ELSE 0 END DESC,
+                  CASE WHEN total_views >= 100 THEN performance_score ELSE 0 END DESC,
+                  total_clicks DESC, created_at DESC
+         LIMIT 4`
       )
-      newProductIds.push(...top.map(r => r.id).slice(0, 3 - newProductIds.length))
+      const explore = await query<{ id: number }>(
+        `SELECT id FROM products
+         WHERE approved IS NOT 0 AND total_views < 100
+         ORDER BY RANDOM() LIMIT 1`
+      )
+      const candidates = [...exploit.slice(0, 2), ...explore]
+      newProductIds.push(...candidates.map(r => r.id).slice(0, 3 - newProductIds.length))
     }
 
     const summary = `${newProductIds.length}개 제품 발굴 (키워드: ${keyword})`
@@ -126,11 +139,22 @@ export async function runFullCycle(): Promise<OrchestratorResult> {
     await completeTask(trendTaskId, msg, 'failed')
     results.trend_agent = { status: 'error', summary: msg, revenueAdded: 0 }
     // fallback: use existing products
-    const top = await query<{ id: number }>('SELECT id FROM products WHERE approved IS NOT 0 ORDER BY viral_score DESC LIMIT 3')
+    const top = await query<{ id: number }>(
+      `SELECT id FROM products WHERE approved IS NOT 0 AND NOT (total_views >= 500 AND profit_score < -20)
+       ORDER BY CASE WHEN actual_revenue > 0 THEN profit_score ELSE 0 END DESC,
+                performance_score DESC, total_clicks DESC, created_at DESC LIMIT 3`
+    )
     newProductIds.push(...top.map(r => r.id))
   }
 
   // ── 3. 콘텐츠 에이전트: 발굴된 제품 → 콘텐츠 생성 ──
+  await refreshProductTrendScores('KR')
+  await refreshProductDecisions()
+  const rankedProductIds = await selectProductCandidates(
+    'KR', 3, `${new Date().toISOString().slice(0, 10)}:orchestrator:${keyword}`
+  )
+  if (rankedProductIds.length) newProductIds.splice(0, newProductIds.length, ...rankedProductIds)
+
   await setAgentState('content_agent', 'running', `${newProductIds.length}개 제품 콘텐츠 생성 중`)
   const contentTaskId = await logTask('content_agent', 'generate_content', JSON.stringify(newProductIds))
   let contentGenerated = 0
@@ -213,7 +237,7 @@ export async function runFullCycle(): Promise<OrchestratorResult> {
       `SELECT COUNT(*) as c FROM content WHERE status = 'posted'`
     )
     const totalRevRow = await queryOne<{ t: number }>(
-      `SELECT COALESCE(SUM(amount), 0) as t FROM revenue_logs`
+      `SELECT COALESCE(SUM(amount), 0) as t FROM revenue_events`
     )
     const totalViews = await queryOne<{ v: number }>(
       `SELECT COALESCE(SUM(views), 0) as v FROM content WHERE status = 'posted'`

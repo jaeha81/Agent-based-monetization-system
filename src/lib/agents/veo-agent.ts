@@ -15,6 +15,7 @@ export function buildSceneVeoPrompt(
   scene: SceneDefinition,
   productName: string,
 ): string {
+  void productName
   const base = `${scene.veoPrompt}, no text overlay, no subtitles, 9:16 vertical aspect ratio`
   return base
 }

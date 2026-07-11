@@ -50,7 +50,7 @@ export async function GET() {
     ])
 
     // qa_result를 별도 쿼리 (컬럼 미존재 시 무시)
-    let qaMap: Record<number, number> = {}
+    const qaMap: Record<number, number> = {}
     try {
       const qaRows = await query<{ id: number; qa_result: string | null }>(`
         SELECT id, qa_result FROM content

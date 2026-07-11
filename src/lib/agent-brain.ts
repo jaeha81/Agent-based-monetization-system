@@ -215,8 +215,8 @@ async function detectProblems(): Promise<BrainProblem[]> {
     try {
       const revStats = await queryOne<{ this_week: number; last_week: number }>(
         `SELECT
-           COALESCE((SELECT SUM(amount) FROM revenue_logs WHERE logged_at > datetime('now','-7 days')), 0) as this_week,
-           COALESCE((SELECT SUM(amount) FROM revenue_logs WHERE logged_at BETWEEN datetime('now','-14 days') AND datetime('now','-7 days')), 0) as last_week`
+           COALESCE((SELECT SUM(amount) FROM revenue_events WHERE logged_at > datetime('now','-7 days')), 0) as this_week,
+           COALESCE((SELECT SUM(amount) FROM revenue_events WHERE logged_at BETWEEN datetime('now','-14 days') AND datetime('now','-7 days')), 0) as last_week`
       )
       if (revStats && revStats.last_week > 10000 && revStats.this_week < revStats.last_week * 0.5) {
         problems.push({
@@ -227,7 +227,7 @@ async function detectProblems(): Promise<BrainProblem[]> {
           resolved: false, detected_at: now,
         })
       }
-    } catch { /* revenue_logs 없으면 무시 */ }
+    } catch { /* canonical revenue view unavailable */ }
 
     // 6. 공개 영상 없음 (private만 존재)
     const publicCount = await queryOne<{ count: number }>(

@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getYouTubeAnalyticsRevenue } from '@/lib/youtube'
 import { query } from '@/lib/db'
+import { isAdminRequest } from '@/lib/admin-auth'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
+  if (!await isAdminRequest(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { searchParams } = new URL(req.url)
-  const days = parseInt(searchParams.get('days') || '30')
+  const requestedDays = Number(searchParams.get('days') || 30)
+  const days = Number.isInteger(requestedDays) ? Math.min(365, Math.max(1, requestedDays)) : 30
 
   const endDate = new Date()
   const startDate = new Date()
@@ -17,9 +20,7 @@ export async function GET(req: NextRequest) {
   const endStr = endDate.toISOString().slice(0, 10)
 
   const [analytics, videoStats] = await Promise.all([
-    process.env.YOUTUBE_REFRESH_TOKEN
-      ? getYouTubeAnalyticsRevenue(startStr, endStr)
-      : Promise.resolve({ rows: [], totalRevenue: 0, totalViews: 0, hasMonetization: false }),
+    getYouTubeAnalyticsRevenue(startStr, endStr),
     // Real view counts from DB (synced by revenue-sync cron)
     query<{ youtube_video_id: string; views: number; product_name: string; posted_at: string | null }>(`
       SELECT sp.youtube_video_id, c.views, p.name as product_name, sp.published_at as posted_at
@@ -42,5 +43,5 @@ export async function GET(req: NextRequest) {
     totalViewsFromDb,
     period: { startDate: startStr, endDate: endStr, days },
     credentialSet: !!process.env.YOUTUBE_REFRESH_TOKEN,
-  })
+  }, { headers: { 'Cache-Control': 'private, no-store' } })
 }

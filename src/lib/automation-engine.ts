@@ -1,5 +1,5 @@
 import { query, queryOne, execute } from '@/lib/db'
-import { searchTrendingProducts, generateAffiliateLink, getCategoryCommissionRate } from '@/lib/coupang'
+import { searchTrendingProducts, generateAffiliateLink } from '@/lib/coupang'
 import { runTrendAgent } from '@/lib/agents/trend-agent'
 import { runContentAgent } from '@/lib/agents/content-agent'
 import { runClickAgent } from '@/lib/agents/click-agent'
@@ -8,13 +8,18 @@ import { buildShortsDescription } from '@/lib/youtube'
 import { sendDiscordWebhook, makeEmbed, COLORS } from '@/lib/discord'
 import { getActiveMarkets, buildAffiliateUrl, getAffiliateDisclosure, MARKETS } from '@/lib/markets'
 import { submitShotstackScenicRender } from '@/lib/shotstack'
-import { submitVeoJob, buildVeoPrompt } from '@/lib/agents/veo-agent'
+import { submitVeoJob, buildVeoPrompt, isVeoRender } from '@/lib/agents/veo-agent'
 import { generateVideoScenario } from '@/lib/agents/scenario-agent'
 import { generateProductImage, buildProductImagePrompt } from '@/lib/agents/image-agent'
 import { postTistory, buildTistoryContent } from '@/lib/tistory'
 import { postInstagramReel } from '@/lib/instagram'
 import { postTikTokVideo } from '@/lib/tiktok'
 import { postFacebookReel } from '@/lib/facebook'
+import { PRIVATE_UPLOAD_STATUS, buildTrackedAffiliateUrl, requireAffiliateUrl } from '@/lib/publishing-safety'
+import { runAutomatedVideoQa } from '@/lib/video-qa'
+import { recordContentCost } from '@/lib/profitability'
+import { refreshProductDecisions, selectProductCandidates } from '@/lib/product-selection'
+import { refreshProductTrendScores } from '@/lib/trend-product-matcher'
 
 export interface AutomationResult {
   runId: number
@@ -51,10 +56,12 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
   let productsFound = 0
   let contentGenerated = 0
   let scheduled = 0
-  let videosCreated = 0
+  const videosCreated = 0
   let blogsPosted = 0
 
   try {
+    await refreshProductTrendScores()
+    await refreshProductDecisions()
     for (const market of activeMarkets) {
       const cfg = MARKETS[market]
       const keyword = cfg.trendKeywords[new Date().getDay() % cfg.trendKeywords.length]
@@ -69,7 +76,8 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
           let productId: number
           if (existing) {
             productId = existing.id
-            await execute('UPDATE products SET coupang_url = ?, commission_rate = ? WHERE id = ?', [cp.productUrl, cp.commissionRate, productId])
+            const affiliate = await generateAffiliateLink(cp.productUrl, cp.productId, cp.commissionRate)
+            await execute('UPDATE products SET coupang_url = ?, commission_rate = ? WHERE id = ?', [affiliate.shortUrl, cp.commissionRate, productId])
           } else {
             const affiliate = await generateAffiliateLink(cp.productUrl, cp.productId)
             const { lastInsertRowid } = await execute(
@@ -87,7 +95,7 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
       } else {
         // Global markets — use trend agent to discover products
         try {
-          await runTrendAgent(keyword)
+          await runTrendAgent(keyword, undefined, market)
           const recent = await query<{ id: number }>(`SELECT id FROM products WHERE target_market = ? AND approved IS NOT 0 ORDER BY id DESC LIMIT 5`, [market])
           if (!recent.length) {
             const fallback = await query<{ id: number }>('SELECT id FROM products WHERE approved IS NOT 0 ORDER BY id DESC LIMIT 5')
@@ -101,12 +109,17 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
       }
 
       if (savedProductIds.length === 0) {
-        await runTrendAgent(keyword)
+        await runTrendAgent(keyword, undefined, market)
         const recent = await query<{ id: number }>('SELECT id FROM products WHERE approved IS NOT 0 ORDER BY id DESC LIMIT 5')
         savedProductIds.push(...recent.map(r => r.id))
       }
 
-      for (const productId of savedProductIds.slice(0, 3)) {
+      const rankedProductIds = await selectProductCandidates(
+        market, 3, `${new Date().toISOString().slice(0, 10)}:${market}:${keyword}`
+      )
+      const productionProductIds = rankedProductIds.length ? rankedProductIds : savedProductIds.slice(0, 3)
+
+      for (const productId of productionProductIds) {
         const product = await queryOne<{ id: number; name: string; category: string; coupang_url: string | null }>(
           'SELECT * FROM products WHERE id = ? AND approved IS NOT 0', [productId]
         )
@@ -122,7 +135,13 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
         }
 
         try {
-          const affiliateUrl = buildAffiliateUrl(product.name, market, product.coupang_url ?? undefined)
+          const affiliateUrl = requireAffiliateUrl(buildAffiliateUrl(product.name, market, product.coupang_url ?? undefined))
+          if (market !== 'KR' && product.coupang_url !== affiliateUrl) {
+            await execute(
+              `UPDATE products SET coupang_url = ?, affiliate_program = 'amazon', target_market = ? WHERE id = ?`,
+              [affiliateUrl, market, product.id]
+            )
+          }
 
           // 1. Click-optimization
           const clickOpt = await runClickAgent(product.name, product.category, undefined, cfg.language)
@@ -149,7 +168,8 @@ export async function runDailyAutomation(): Promise<AutomationResult> {
           for (const c of contents) {
             const optimizedTags = buildOptimizedTags(seoResult, c.platform)
             const disclosure = getAffiliateDisclosure(cfg.language)
-            const desc = buildShortsDescription(c.script || '', affiliateUrl, optimizedTags) + '\n\n' + disclosure
+            const trackedUrl = buildTrackedAffiliateUrl(c.id, productId)
+            const desc = buildShortsDescription(c.script || '', trackedUrl, optimizedTags) + '\n\n' + disclosure
 
             await execute(
               `UPDATE content SET script = ?, status = 'scheduled' WHERE id = ?`,
@@ -265,16 +285,20 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
         if (videoUrl) {
           const { uploadYouTubeShorts, buildShortsTags } = await import('@/lib/youtube')
           const tags = buildShortsTags(post.product_name, '')
+          const trackedUrl = buildTrackedAffiliateUrl(post.content_id, post.product_id)
+          const description = buildShortsDescription(post.hook || post.script || '', trackedUrl, tags)
           const videoBuffer = Buffer.from(await (await fetch(videoUrl)).arrayBuffer())
+          const qa = await runAutomatedVideoQa(post.content_id, videoBuffer)
+          if (!qa.passed) throw new Error(`영상 QA 실패: ${JSON.stringify(qa.checks)}`)
           const ytResult = await uploadYouTubeShorts(
-            { title: (post.hook || post.product_name).slice(0, 100), description: post.script || '', tags, privacyStatus: 'private', madeForKids: false },
+            { title: (post.hook || post.product_name).slice(0, 100), description, tags, privacyStatus: 'private', madeForKids: false },
             videoBuffer
           )
           await execute(
-            `UPDATE scheduled_posts SET youtube_video_id = ?, status = 'published', published_at = datetime('now') WHERE id = ?`,
-            [ytResult.videoId, post.id]
+            `UPDATE scheduled_posts SET youtube_video_id = ?, status = ?, visibility = 'private', published_at = NULL WHERE id = ?`,
+            [ytResult.videoId, PRIVATE_UPLOAD_STATUS, post.id]
           )
-          await execute(`UPDATE content SET status = 'posted', posted_at = datetime('now') WHERE id = ?`, [post.content_id])
+          await execute(`UPDATE content SET status = ?, posted_at = NULL WHERE id = ?`, [PRIVATE_UPLOAD_STATUS, post.content_id])
           console.log(`[Publish] YouTube 업로드 완료: ${ytResult.url}`)
           succeeded++
           continue
@@ -321,19 +345,31 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
               if (!hasShotstack) throw veoErr
               console.warn('[Publish] Veo 실패, Shotstack 폴백:', veoErr instanceof Error ? veoErr.message : String(veoErr))
               const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
-              const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
-              renderId = await submitShotstackScenicRender(scenario, post.product_name, imageUrl, language, callbackUrl, post.coupang_url || undefined)
+              const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.SHOTSTACK_WEBHOOK_SECRET || ''}`
+              renderId = await submitShotstackScenicRender(scenario, post.product_name, imageUrl, language, callbackUrl, post.coupang_url || undefined, post.content_id)
             }
           } else {
             const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
-            const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.CRON_SECRET || ''}`
-            renderId = await submitShotstackScenicRender(scenario, post.product_name, imageUrl, language, callbackUrl, post.coupang_url || undefined)
+            const callbackUrl = `${baseUrl}/api/webhook/shotstack?secret=${process.env.SHOTSTACK_WEBHOOK_SECRET || ''}`
+            renderId = await submitShotstackScenicRender(scenario, post.product_name, imageUrl, language, callbackUrl, post.coupang_url || undefined, post.content_id)
           }
 
-          await execute('UPDATE content SET render_id = ? WHERE id = ?', [renderId, post.content_id])
+          const renderProvider = isVeoRender(renderId) ? 'veo' : 'shotstack'
+          await execute(
+            `UPDATE content SET render_id = ?, image_url = ?, render_provider = ?,
+             video_width = 1080, video_height = 1920, video_duration_seconds = ? WHERE id = ?`,
+            [renderId, imageUrl, renderProvider, renderProvider === 'shotstack' ? 25 : 8, post.content_id]
+          )
+          await Promise.all([
+            recordContentCost(post.content_id, isVeoRender(renderId) ? 'veo_render' : 'shotstack_render', renderId),
+            recordContentCost(post.content_id, 'llm_content', renderId),
+            recordContentCost(post.content_id, 'tts', renderId),
+            ...(imageUrl ? [recordContentCost(post.content_id, 'image_generation', renderId)] : []),
+          ])
           console.log(`[Publish] 렌더 제출 완료: ${renderId}`)
         } catch (vidErr) {
           console.error('[Publish] 영상 생성 제출 실패:', vidErr)
+          throw vidErr
         }
         continue
       }
@@ -401,7 +437,8 @@ export async function publishScheduledPosts(): Promise<{ attempted: number; succ
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       const retryCount = post.retry_count ?? 0
-      if (retryCount < 3) {
+      const nonRetryable = msg.includes('NON_RETRYABLE_PROVIDER') || msg.includes('게시 차단:')
+      if (!nonRetryable && retryCount < 3) {
         const retryAt = new Date(Date.now() + (retryCount + 1) * 60 * 60 * 1000).toISOString()
         await execute(
           `UPDATE scheduled_posts SET status = 'pending', retry_count = ?, scheduled_for = ?, error = ? WHERE id = ?`,

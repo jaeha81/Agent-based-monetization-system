@@ -21,6 +21,19 @@ interface Product {
   viral_score: number
   estimated_revenue: number
   commission_rate: number
+  performance_score: number
+  total_views: number
+  total_engaged_views: number
+  total_clicks: number
+  avg_retention: number
+  actual_revenue: number
+  total_cost: number
+  net_profit: number
+  profit_score: number
+  selection_score: number
+  decision_action: string
+  market_trend_score: number
+  revenue_data_complete_through: string | null
 }
 
 export default function ProductsPage() {
@@ -67,7 +80,7 @@ export default function ProductsPage() {
     <div className="space-y-6 max-w-5xl">
       <div>
         <h2 className="text-xl font-bold">제품 발굴 에이전트</h2>
-        <p className="text-sm text-gray-500 mt-0.5">AI가 트렌딩 제품을 발굴하고 쿠팡 수익을 예측합니다</p>
+        <p className="text-sm text-gray-500 mt-0.5">실제 시청 유지율·조회수·상품 클릭을 학습해 수익 가능성이 높은 제품을 우선 발굴합니다</p>
       </div>
 
       {/* Search Form */}
@@ -181,21 +194,39 @@ function ProductCard({ product }: { product: Product }) {
           <span className="font-medium text-yellow-600">{product.commission_rate}%</span>
         </div>
         <div className="flex items-center justify-between">
-          <span>실제 수익</span>
-          <span className="font-medium text-gray-400">
-            {product.estimated_revenue > 0
-              ? (product.estimated_revenue >= 10000
-                ? `${(product.estimated_revenue / 10000).toFixed(0)}만원`
-                : `${product.estimated_revenue.toLocaleString()}원`)
-              : '집계 대기 중'}
-          </span>
+          <span>성과 점수</span>
+          <span className="font-medium text-blue-600">{(product.performance_score || 0).toFixed(1)}점</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span>조회 / 참여시청 / 클릭</span>
+          <span className="font-medium text-gray-700">{(product.total_views || 0).toLocaleString()} / {(product.total_engaged_views || 0).toLocaleString()} / {(product.total_clicks || 0).toLocaleString()}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span>자가루프 판단</span>
+          <span className="font-medium text-violet-600">{product.decision_action || 'learn'} · {(product.selection_score || 0).toFixed(1)}점</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span>시장 연관점수</span>
+          <span className="font-medium text-orange-600">{(product.market_trend_score || 0).toFixed(1)}점</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span>평균 시청 유지율</span>
+          <span className="font-medium text-gray-700">{(product.avg_retention || 0).toFixed(1)}%</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span>실제 순이익</span>
+          <span className={`font-semibold ${(product.net_profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{(product.net_profit || 0).toLocaleString()}원</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span>수익 / 제작비</span>
+          <span className="font-medium text-gray-700">{(product.actual_revenue || 0).toLocaleString()} / {(product.total_cost || 0).toLocaleString()}원</span>
         </div>
       </div>
 
       <div className="mt-3 pt-3 border-t border-gray-100">
         <div className="flex items-center gap-1 text-xs text-gray-400">
           <TrendingUp size={11} />
-          <span>YouTube 업로드 후 조회수 기반 수익 집계</span>
+          <span>성과 80% 활용 · 신규 상품 20% 탐색</span>
         </div>
       </div>
     </div>

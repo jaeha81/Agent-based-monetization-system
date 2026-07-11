@@ -88,6 +88,8 @@ export async function generateProductImage(
   _category: string = '일반',
   _productName: string = '',
 ): Promise<string | null> {
+  void _category
+  void _productName
   const apiKey = process.env.STABILITY_API_KEY?.replace(/^﻿/, '').trim()
 
   if (!apiKey) {

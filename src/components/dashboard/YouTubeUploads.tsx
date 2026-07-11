@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Image from 'next/image'
 
 interface VideoDetail {
   views: number
@@ -109,9 +110,12 @@ export default function YouTubeUploads() {
             <div key={u.sp_id} className="flex items-center gap-3 p-3 rounded-lg border border-gray-100 hover:border-gray-200 transition-colors">
               {/* 썸네일 */}
               {u.yt?.thumbnail ? (
-                <img
+                <Image
                   src={u.yt.thumbnail}
                   alt=""
+                  width={80}
+                  height={45}
+                  unoptimized
                   className="w-20 h-[45px] object-cover rounded flex-shrink-0"
                 />
               ) : (

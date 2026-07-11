@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query, execute } from '@/lib/db'
+import { isAdminRequest } from '@/lib/admin-auth'
 
 export const runtime = 'nodejs'
 
 // Shotstack sandbox 렌더 24h 만료로 영구 waiting 상태에 빠진 잡들을 failed로 정리
 export async function POST(req: NextRequest) {
-  const secret = req.nextUrl.searchParams.get('secret')
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+  if (!await isAdminRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

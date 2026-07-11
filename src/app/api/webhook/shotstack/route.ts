@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { queryOne, execute } from '@/lib/db'
 import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags } from '@/lib/youtube'
 import { resumeVideoRenderJob } from '@/lib/workflow-engine'
+import { PRIVATE_UPLOAD_STATUS, buildTrackedAffiliateUrl, requireAffiliateUrl } from '@/lib/publishing-safety'
+import { runAutomatedVideoQa } from '@/lib/video-qa'
 
 export const runtime = 'nodejs'
 export const maxDuration = 120
 
 export async function POST(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get('secret')
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+  if (!process.env.SHOTSTACK_WEBHOOK_SECRET || secret !== process.env.SHOTSTACK_WEBHOOK_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -24,6 +26,12 @@ export async function POST(req: NextRequest) {
   if (!renderId) {
     return NextResponse.json({ error: 'missing renderId' }, { status: 400 })
   }
+
+  const event = await execute(
+    `INSERT OR IGNORE INTO webhook_events (provider, event_key) VALUES ('shotstack', ?)`,
+    [`${renderId}:${status || 'unknown'}`]
+  )
+  if (event.rowsAffected === 0) return NextResponse.json({ ok: true, action: 'duplicate_ignored' })
 
   console.log(`[Webhook/Shotstack] render_id=${renderId} status=${status}`)
 
@@ -50,10 +58,10 @@ export async function POST(req: NextRequest) {
 
   // Path 2: automation-engine (scheduled_post waiting for video via render_id)
   const content = await queryOne<{
-    id: number; hook: string | null; script: string | null
+    id: number; product_id: number; hook: string | null; script: string | null
     product_name: string; category: string; coupang_url: string | null
   }>(
-    `SELECT c.id, c.hook, c.script, p.name as product_name, p.category, p.coupang_url
+    `SELECT c.id, c.product_id, c.hook, c.script, p.name as product_name, p.category, p.coupang_url
      FROM content c
      JOIN products p ON c.product_id = p.id
      WHERE c.render_id = ? AND c.platform = 'YouTube'`,
@@ -66,9 +74,18 @@ export async function POST(req: NextRequest) {
     if (process.env.YOUTUBE_CLIENT_ID && process.env.YOUTUBE_REFRESH_TOKEN) {
       try {
         const tags = buildShortsTags(content.product_name, content.category)
-        const affiliateUrl = content.coupang_url || 'https://www.coupang.com'
+        requireAffiliateUrl(content.coupang_url)
+        const affiliateUrl = buildTrackedAffiliateUrl(content.id, content.product_id)
         const description = buildShortsDescription(content.script || '', affiliateUrl, tags)
         const videoBuffer = Buffer.from(await (await fetch(videoUrl)).arrayBuffer())
+        const qa = await runAutomatedVideoQa(content.id, videoBuffer)
+        if (!qa.passed) {
+          await execute(
+            `UPDATE scheduled_posts SET status = 'failed', error = ? WHERE content_id = ? AND platform = 'YouTube'`,
+            [`영상 QA 실패: ${JSON.stringify(qa.checks)}`, content.id]
+          )
+          return NextResponse.json({ ok: false, action: 'qa_failed', qa }, { status: 422 })
+        }
 
         const ytResult = await uploadYouTubeShorts({
           title: (content.hook || content.product_name).slice(0, 100),
@@ -79,17 +96,16 @@ export async function POST(req: NextRequest) {
         }, videoBuffer)
 
         await execute(
-          `UPDATE content SET status = 'posted', posted_at = datetime('now') WHERE id = ?`,
-          [content.id]
+          `UPDATE content SET status = ?, posted_at = NULL WHERE id = ?`,
+          [PRIVATE_UPLOAD_STATUS, content.id]
         )
         await execute(
-          `UPDATE scheduled_posts SET youtube_video_id = ?, status = 'published', published_at = datetime('now')
+          `UPDATE scheduled_posts SET youtube_video_id = ?, status = ?, visibility = 'private', published_at = NULL
            WHERE content_id = ? AND platform = 'YouTube'`,
-          [ytResult.videoId, content.id]
+          [ytResult.videoId, PRIVATE_UPLOAD_STATUS, content.id]
         )
-
         console.log(`[Webhook/Shotstack] YouTube 업로드 완료: ${ytResult.url}`)
-        return NextResponse.json({ ok: true, action: 'youtube_uploaded', videoId: ytResult.videoId, url: ytResult.url })
+        return NextResponse.json({ ok: true, action: 'youtube_uploaded', videoId: ytResult.videoId, url: ytResult.url, qa })
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         console.error('[Webhook/Shotstack] YouTube upload error:', msg)

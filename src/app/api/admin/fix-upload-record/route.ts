@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { execute, queryOne } from '@/lib/db'
+import { PRIVATE_UPLOAD_STATUS } from '@/lib/publishing-safety'
+import { isAdminRequest } from '@/lib/admin-auth'
 
 export const runtime = 'nodejs'
 
-// POST /api/admin/fix-upload-record?secret=<CRON_SECRET>
+// POST /api/admin/fix-upload-record
 // Body: { contentId: number, youtubeVideoId: string }
 // scheduled_posts 누락 항목 수동 삽입 + content status 보정
 export async function POST(req: NextRequest) {
-  const secret = req.nextUrl.searchParams.get('secret')
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+  if (!await isAdminRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -30,20 +31,20 @@ export async function POST(req: NextRequest) {
 
   if (existing) {
     await execute(
-      `UPDATE scheduled_posts SET youtube_video_id = ?, status = 'published', published_at = datetime('now') WHERE content_id = ? AND platform = 'YouTube'`,
-      [youtubeVideoId, contentId]
+      `UPDATE scheduled_posts SET youtube_video_id = ?, status = ?, visibility = 'private', published_at = NULL WHERE content_id = ? AND platform = 'YouTube'`,
+      [youtubeVideoId, PRIVATE_UPLOAD_STATUS, contentId]
     )
   } else {
     await execute(
-      `INSERT INTO scheduled_posts (content_id, platform, scheduled_for, status, youtube_video_id, published_at) VALUES (?, 'YouTube', datetime('now'), 'published', ?, datetime('now'))`,
-      [contentId, youtubeVideoId]
+      `INSERT INTO scheduled_posts (content_id, platform, scheduled_for, status, youtube_video_id, visibility, published_at) VALUES (?, 'YouTube', datetime('now'), ?, ?, 'private', NULL)`,
+      [contentId, PRIVATE_UPLOAD_STATUS, youtubeVideoId]
     )
   }
 
-  if (content.status !== 'posted') {
+  if (content.status !== PRIVATE_UPLOAD_STATUS) {
     await execute(
-      `UPDATE content SET status = 'posted', posted_at = datetime('now') WHERE id = ?`,
-      [contentId]
+      `UPDATE content SET status = ?, posted_at = NULL WHERE id = ?`,
+      [PRIVATE_UPLOAD_STATUS, contentId]
     )
   }
 

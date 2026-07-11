@@ -1,23 +1,61 @@
 import type { VideoScenario } from './agents/scenario-agent'
+import { execute, query } from '@/lib/db'
+import { createTtsToken } from '@/lib/tts-auth'
 
-const BASE = 'https://api.shotstack.io'
+const BASE = 'https://api.shotstack.io/edit'
 const STAGE = () => (process.env.SHOTSTACK_STAGE === 'v1' ? 'v1' : 'stage')
 
 // BOM 및 공백 제거
 const getShotstackKey = () => process.env.SHOTSTACK_API_KEY?.replace(/^﻿/, '').trim()
 
-// 로열티프리 음악 풀 (Incompetech/Kevin MacLeod — CC BY 3.0, 직접 접근 확인)
-const MUSIC_POOL = [
-  'https://incompetech.com/music/royalty-free/mp3-royaltyfree/Americana.mp3',
-  'https://incompetech.com/music/royalty-free/mp3-royaltyfree/Beach%20Party.mp3',
-  'https://incompetech.com/music/royalty-free/mp3-royaltyfree/Bright%20Wish.mp3',
-  'https://incompetech.com/music/royalty-free/mp3-royaltyfree/Cool%20Vibes.mp3',
-]
+async function assertShotstackCircuit(): Promise<void> {
+  const circuit = await query<{ value: string }>("SELECT value FROM settings WHERE key = 'circuit:shotstack'").catch(() => [])
+  if (circuit[0]?.value === 'open') {
+    throw new Error('NON_RETRYABLE_PROVIDER: Shotstack 회로가 열려 있습니다. 크레딧 충전 후 설정을 초기화하세요.')
+  }
+}
 
-function pickMusic(seed: string): string {
-  let sum = 0
-  for (let i = 0; i < seed.length; i++) sum += seed.charCodeAt(i)
-  return MUSIC_POOL[sum % MUSIC_POOL.length]
+function isQuotaFailure(message: string): boolean {
+  const lower = message.toLowerCase()
+  return lower.includes('credits required') || lower.includes('plan limits') || lower.includes('insufficient credit') || lower.includes('quota')
+}
+
+async function throwShotstackError(prefix: string, response: Response): Promise<never> {
+  const detail = await response.text()
+  if (isQuotaFailure(detail)) {
+    await execute("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('circuit:shotstack', 'open', datetime('now'))").catch(() => {})
+    throw new Error(`NON_RETRYABLE_PROVIDER: ${prefix}: ${detail}`)
+  }
+  throw new Error(`${prefix}: ${detail}`)
+}
+
+async function pickMusic(seed: string, contentId?: number): Promise<string> {
+  const tracks = await query<{ id: string; url: string; performance_score: number; uses: number }>(`
+    SELECT id, url, performance_score, uses FROM music_tracks
+    WHERE active = 1 AND commercial_use = 1
+    ORDER BY performance_score DESC, uses ASC
+  `).catch(() => [])
+  if (tracks.length === 0) throw new Error('렌더 차단: 상업 이용권이 검증된 활성 음악이 없습니다.')
+  const hash = `${contentId || 0}:${seed}`.split('').reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) >>> 0, 7)
+  const explore = hash % 5 === 0
+  const selected = explore ? tracks[hash % tracks.length] : tracks[0]
+  const propensity = explore
+    ? 0.2 / tracks.length
+    : 0.8 + 0.2 / tracks.length
+  await execute('UPDATE music_tracks SET uses = uses + 1 WHERE id = ?', [selected.id]).catch(() => {})
+  if (contentId) {
+    await execute(
+      `INSERT INTO music_assignments
+       (assignment_key, music_track_id, content_id, explore, propensity, policy_version, assigned_at)
+       VALUES (?, ?, ?, ?, ?, 'music-v1', datetime('now'))
+       ON CONFLICT(content_id) DO UPDATE SET music_track_id = excluded.music_track_id,
+         explore = excluded.explore, propensity = excluded.propensity,
+         policy_version = excluded.policy_version, assigned_at = excluded.assigned_at`,
+      [`content:${contentId}`, selected.id, contentId, explore ? 1 : 0, propensity]
+    )
+    await execute('UPDATE content SET music_track_id = ? WHERE id = ?', [selected.id, contentId])
+  }
+  return selected.url
 }
 
 const BG_GRADIENTS = [
@@ -45,27 +83,27 @@ export async function submitShotstackScenicRender(
   language: string = 'ko',
   callbackUrl?: string,
   affiliateUrl?: string,
+  contentId?: number,
 ): Promise<string> {
+  await assertShotstackCircuit()
   const key = getShotstackKey()
   if (!key) throw new Error('SHOTSTACK_API_KEY 미설정')
 
   const bg = BG_GRADIENTS[Math.abs(scenario.hook.length * 7 + productName.length * 3) % BG_GRADIENTS.length]
   const [bgFrom, bgTo] = bg.split(',').slice(0, 2)
 
-  const scenes = buildAllScenes(scenario, productName, bgFrom, bgTo, affiliateUrl)
-
   const ttsText = (scenario.ttsScript || `${scenario.hook}. ${productName}.`).slice(0, 500)
   const ttsVoice = language === 'ko' ? 'Seoyeon' : language === 'ja' ? 'Mizuki' : 'Amy'
 
   // data: URI는 Shotstack이 다운로드 불가 → https:// URL만 허용
   const safeImageUrl = imageUrl?.startsWith('https://') ? imageUrl : null
-  const imageTracks = safeImageUrl
-    ? [{ clips: [{ asset: { type: 'image', src: safeImageUrl }, start: 7, length: 11, fit: 'cover', opacity: 0.4, effect: 'zoomIn' }] }]
-    : []
+  const scenes = buildAllScenes(scenario, productName, bgFrom, bgTo, affiliateUrl, Boolean(safeImageUrl))
+  const imageTracks = buildProductImageTracks(safeImageUrl)
 
   // TTS 나레이션 생성 (Shotstack Ingest API - AWS Polly Seoyeon)
   const ttsUrl = await generateShotstackTTS(ttsText, ttsVoice)
-  const bgMusic = pickMusic(productName)
+  if (!ttsUrl) throw new Error('렌더 차단: GOOGLE_TTS_API_KEY가 없어 필수 나레이션을 생성할 수 없습니다.')
+  const bgMusic = await pickMusic(productName, contentId)
 
   // TTS 성공: 나레이션(1.0) + 배경음악(0.12) / 실패: 배경음악만(0.8)
   const body = buildRenderBody(scenes, imageTracks, ttsUrl ?? bgMusic, callbackUrl, ttsUrl ? bgMusic : undefined)
@@ -78,8 +116,12 @@ export async function submitShotstackScenicRender(
 
   if (!res.ok) {
     const errText = await res.text()
+    if (isQuotaFailure(errText)) {
+      await execute("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('circuit:shotstack', 'open', datetime('now'))").catch(() => {})
+      throw new Error(`NON_RETRYABLE_PROVIDER: Shotstack 렌더 실패: ${errText}`)
+    }
     console.warn('[Shotstack] 시나리오 렌더 실패, 배경음악만으로 재시도:', errText.slice(0, 200))
-    return submitShotstackScenicRenderWithMusic(scenario, productName, imageUrl, language, callbackUrl, affiliateUrl)
+    throw new Error(`Shotstack scenic render failed: ${errText.slice(0, 500)}`)
   }
 
   const { response } = await res.json() as { response: { id: string } }
@@ -87,7 +129,7 @@ export async function submitShotstackScenicRender(
 }
 
 // 4씬 + 배경음악만 (TTS 실패 폴백)
-async function submitShotstackScenicRenderWithMusic(
+export async function submitShotstackScenicRenderWithMusic(
   scenario: VideoScenario,
   productName: string,
   imageUrl: string | null,
@@ -95,18 +137,17 @@ async function submitShotstackScenicRenderWithMusic(
   callbackUrl?: string,
   affiliateUrl?: string,
 ): Promise<string> {
+  await assertShotstackCircuit()
   const key = getShotstackKey()!
 
   const bg = BG_GRADIENTS[Math.abs(scenario.hook.length * 7 + productName.length * 3) % BG_GRADIENTS.length]
   const [bgFrom, bgTo] = bg.split(',').slice(0, 2)
 
-  const scenes = buildAllScenes(scenario, productName, bgFrom, bgTo, affiliateUrl)
   const safeImageUrl2 = imageUrl?.startsWith('https://') ? imageUrl : null
-  const imageTracks = safeImageUrl2
-    ? [{ clips: [{ asset: { type: 'image', src: safeImageUrl2 }, start: 7, length: 11, fit: 'cover', opacity: 0.4, effect: 'zoomIn' }] }]
-    : []
+  const scenes = buildAllScenes(scenario, productName, bgFrom, bgTo, affiliateUrl, Boolean(safeImageUrl2))
+  const imageTracks = buildProductImageTracks(safeImageUrl2)
 
-  const body = buildRenderBody(scenes, imageTracks, pickMusic(productName), callbackUrl)
+  const body = buildRenderBody(scenes, imageTracks, await pickMusic(productName), callbackUrl)
 
   const res = await fetch(`${BASE}/${STAGE()}/render`, {
     method: 'POST',
@@ -114,7 +155,7 @@ async function submitShotstackScenicRenderWithMusic(
     body: JSON.stringify(body),
   })
 
-  if (!res.ok) throw new Error(`Shotstack 렌더 실패: ${await res.text()}`)
+  if (!res.ok) await throwShotstackError('Shotstack 렌더 실패', res)
   const { response } = await res.json() as { response: { id: string } }
   return response.id
 }
@@ -131,14 +172,14 @@ function buildRenderBody(
   const hasTTS = ttsOrMusicSrc.startsWith('http') && bgMusicSrc
 
   const narrationTrack = hasTTS
-    ? [{ clips: [{ asset: { type: 'audio', src: ttsOrMusicSrc, volume: 1.0 }, start: 0, length: 30 }] }]
+    ? [{ clips: [{ asset: { type: 'audio', src: ttsOrMusicSrc, volume: 1.0 }, start: 0, length: 25 }] }]
     : []
 
   const timeline: Record<string, unknown> = {
     tracks: [
       ...narrationTrack,
-      ...imageTracks,
       { clips: scenes },
+      ...imageTracks,
     ],
   }
 
@@ -162,6 +203,7 @@ export async function submitShotstackRender(
   script?: string,
   affiliateUrl?: string,
 ): Promise<string> {
+  await assertShotstackCircuit()
   const key = getShotstackKey()
   if (!key) throw new Error('SHOTSTACK_API_KEY 미설정')
 
@@ -171,7 +213,8 @@ export async function submitShotstackRender(
   const ttsText = script ? script.slice(0, 500) : `${hook}. ${productName}. 구매 링크는 설명란에 있습니다.`
   const ttsVoice = language === 'ko' ? 'Seoyeon' : language === 'ja' ? 'Mizuki' : 'Amy'
   const ttsUrl = await generateShotstackTTS(ttsText, ttsVoice)
-  const bgMusic = pickMusic(hook)
+  if (!ttsUrl) throw new Error('렌더 차단: GOOGLE_TTS_API_KEY가 없어 필수 나레이션을 생성할 수 없습니다.')
+  const bgMusic = await pickMusic(hook)
 
   const makeTimeline = (tts: string | null, music: string) => {
     const tracks: unknown[] = []
@@ -192,6 +235,8 @@ export async function submitShotstackRender(
   })
 
   if (!res.ok) {
+    const firstError = await res.clone().text()
+    if (isQuotaFailure(firstError)) await throwShotstackError('Shotstack 제출 실패', res)
     // TTS 없이 배경음악만으로 재시도
     const fallback = { ...makeTimeline(null, bgMusic) }
     if (callbackUrl) (fallback as Record<string, unknown>).callback = callbackUrl
@@ -215,6 +260,7 @@ export async function renderShortsVideo(
   script?: string,
   affiliateUrl?: string,
 ): Promise<string> {
+  await assertShotstackCircuit()
   const key = getShotstackKey()
   if (!key) throw new Error('SHOTSTACK_API_KEY 미설정')
 
@@ -223,7 +269,8 @@ export async function renderShortsVideo(
   const ttsText = script ? script.slice(0, 500) : `${hook}. ${productName}. 구매 링크는 설명란에 있습니다.`
   const ttsVoice = language === 'ko' ? 'Seoyeon' : language === 'ja' ? 'Mizuki' : 'Amy'
   const ttsUrl = await generateShotstackTTS(ttsText, ttsVoice)
-  const bgMusic = pickMusic(hook)
+  if (!ttsUrl) throw new Error('렌더 차단: GOOGLE_TTS_API_KEY가 없어 필수 나레이션을 생성할 수 없습니다.')
+  const bgMusic = await pickMusic(hook)
 
   const makeBody = (tts: string | null, music: string) => {
     const tracks: unknown[] = []
@@ -240,6 +287,8 @@ export async function renderShortsVideo(
     body: JSON.stringify(makeBody(ttsUrl, bgMusic)),
   })
   if (!res.ok) {
+    const firstError = await res.clone().text()
+    if (isQuotaFailure(firstError)) await throwShotstackError('Shotstack 렌더 요청 실패', res)
     // TTS 없이 배경음악만으로 재시도
     res = await fetch(`${BASE}/${STAGE()}/render`, {
       method: 'POST',
@@ -264,23 +313,13 @@ export async function renderShortsVideo(
 
 // ─── Vercel TTS 프록시 URL 생성 (Shotstack이 직접 다운로드) ────────────────────
 // GOOGLE_TTS_API_KEY 설정 시 한국어 음성 반환, 미설정 시 null → 음악만 사용
-function generateShotstackTTS(text: string, voice: string = 'Seoyeon'): string | null {
+async function generateShotstackTTS(text: string, voice: string = 'Seoyeon'): Promise<string | null> {
   if (!process.env.GOOGLE_TTS_API_KEY) return null
   const lang = voice === 'Seoyeon' ? 'ko' : voice === 'Mizuki' ? 'ja' : 'en'
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://shorts-dashboard-one.vercel.app'
-  return `${baseUrl}/api/tts?text=${encodeURIComponent(text.slice(0, 500))}&lang=${lang}`
-}
-
-// ─── 음원 URL 빌드: TTS 나레이션 → 로열티프리 음악 폴백 ────────────────────────
-// ⚠️ Google TTS는 base64 data URI 반환 → Shotstack src로 사용 불가 → 제거
-async function buildSoundtrackSrc(text: string, voice: string, language: string): Promise<string> {
-  // 1순위: Shotstack Ingest TTS (AWS Polly - 실제 한국어 음성)
-  const voiceName = language === 'ko' ? 'Seoyeon' : language === 'ja' ? 'Mizuki' : voice
-  const ttsUrl = await generateShotstackTTS(text, voiceName)
-  if (ttsUrl) return ttsUrl
-
-  // 2순위: 로열티프리 배경음악 (항상 작동)
-  return pickMusic(text.slice(0, 10))
+  const safeText = text.slice(0, 500)
+  const token = await createTtsToken(safeText, lang)
+  return `${baseUrl}/api/tts?text=${encodeURIComponent(safeText)}&lang=${lang}&token=${encodeURIComponent(token)}`
 }
 
 // ─── 씬 HTML 빌더 ─────────────────────────────────────────────────────────────
@@ -290,17 +329,43 @@ function buildAllScenes(
   bgFrom: string,
   bgTo: string,
   affiliateUrl?: string,
+  hasProductImage: boolean = false,
 ) {
   return [
     // 씬1: 훅 (0-7초)
-    { asset: { type: 'html', html: buildScene1Hook(scenario.hook, bgFrom, bgTo), width: 1080, height: 1920 }, start: 0, length: 7, fit: 'none' },
+    { asset: { type: 'html', html: buildScene1Hook(scenario.hook, bgFrom, bgTo), width: 1080, height: 1920 }, start: 0, length: 3, fit: 'none' },
     // 씬2: 성능 포인트 (7-18초)
-    { asset: { type: 'html', html: buildScene2Performance(productName, scenario.performancePoints, bgFrom, bgTo), width: 1080, height: 1920 }, start: 7, length: 11, fit: 'none' },
+    { asset: { type: 'html', html: buildScene2Hero(productName, bgFrom, bgTo, hasProductImage), width: 1080, height: 1920 }, start: 3, length: 6, fit: 'none' },
+    { asset: { type: 'html', html: buildScene2Performance(productName, scenario.performancePoints, bgFrom, bgTo, hasProductImage), width: 1080, height: 1920 }, start: 9, length: 6, fit: 'none' },
     // 씬3: 가격 (18-25초)
-    { asset: { type: 'html', html: buildScene3Price(productName, scenario, bgFrom, bgTo), width: 1080, height: 1920 }, start: 18, length: 7, fit: 'none' },
+    { asset: { type: 'html', html: buildScene3Price(productName, scenario, bgFrom, bgTo, hasProductImage), width: 1080, height: 1920 }, start: 15, length: 5, fit: 'none' },
     // 씬4: CTA (25-30초)
-    { asset: { type: 'html', html: buildScene4CTA(scenario.cta, bgFrom, bgTo, affiliateUrl), width: 1080, height: 1920 }, start: 25, length: 5, fit: 'none' },
+    { asset: { type: 'html', html: buildScene4CTA(scenario.cta, bgFrom, bgTo, affiliateUrl, hasProductImage), width: 1080, height: 1920 }, start: 20, length: 5, fit: 'none' },
   ]
+}
+
+function buildProductImageTracks(imageUrl: string | null): object[] {
+  if (!imageUrl) return []
+  const clip = (start: number, length: number, opacity: number, effect: 'zoomIn' | 'zoomOut') => ({
+    asset: { type: 'image', src: imageUrl }, start, length, fit: 'crop', opacity, effect,
+  })
+  return [{ clips: [
+    clip(0, 3, 0.25, 'zoomIn'), clip(3, 6, 1, 'zoomIn'), clip(9, 6, 1, 'zoomOut'),
+    clip(15, 5, 0.88, 'zoomIn'), clip(20, 5, 0.32, 'zoomOut'),
+  ] }]
+}
+
+function sceneBackground(bgFrom: string, bgTo: string, hasProductImage: boolean, strength = 0.72): string {
+  return hasProductImage
+    ? `linear-gradient(180deg,rgba(0,0,0,0.10),rgba(0,0,0,${strength}))`
+    : `linear-gradient(160deg,${bgFrom},${bgTo})`
+}
+
+function buildScene2Hero(productName: string, bgFrom: string, bgTo: string, hasProductImage: boolean): string {
+  return `<div style="width:1080px;height:1920px;background:${sceneBackground(bgFrom, bgTo, hasProductImage, 0.62)};display:flex;flex-direction:column;justify-content:flex-end;align-items:center;padding:120px 80px 250px;box-sizing:border-box;font-family:'Apple SD Gothic Neo','Noto Sans KR',Arial,sans-serif;color:#fff;text-align:center">
+    <div style="font-size:34px;font-weight:800;letter-spacing:5px;color:#FFD700;margin-bottom:24px">PRODUCT CHECK</div>
+    <div style="font-size:64px;font-weight:900;line-height:1.18;text-shadow:0 4px 24px rgba(0,0,0,0.9);word-break:keep-all;max-width:920px">${productName}</div>
+  </div>`
 }
 
 function buildScene1Hook(hook: string, bgFrom: string, bgTo: string): string {
@@ -312,26 +377,26 @@ function buildScene1Hook(hook: string, bgFrom: string, bgTo: string): string {
   </div>`
 }
 
-function buildScene2Performance(productName: string, points: string[], bgFrom: string, bgTo: string): string {
+function buildScene2Performance(productName: string, points: string[], bgFrom: string, bgTo: string, hasProductImage: boolean): string {
   const items = points.slice(0, 3).map((p, i) =>
     `<div style="display:flex;align-items:center;gap:28px;background:rgba(255,255,255,0.10);border:1px solid rgba(255,255,255,0.20);border-radius:24px;padding:32px 40px;margin-bottom:20px;width:100%;box-sizing:border-box;backdrop-filter:blur(10px)">
       <div style="font-size:56px;font-weight:900;color:#FFD700;min-width:64px;text-shadow:0 2px 12px rgba(255,215,0,0.5)">${['①','②','③'][i]}</div>
       <div style="font-size:46px;font-weight:700;line-height:1.3;word-break:keep-all;text-align:left">${p}</div>
     </div>`
   ).join('')
-  return `<div style="width:1080px;height:1920px;background:linear-gradient(160deg,${bgFrom},${bgTo});display:flex;flex-direction:column;justify-content:center;align-items:center;padding:80px;box-sizing:border-box;font-family:'Apple SD Gothic Neo','Noto Sans KR',Arial,sans-serif;color:#fff">
+  return `<div style="width:1080px;height:1920px;background:${sceneBackground(bgFrom, bgTo, hasProductImage, 0.82)};display:flex;flex-direction:column;justify-content:center;align-items:center;padding:160px 80px 240px;box-sizing:border-box;font-family:'Apple SD Gothic Neo','Noto Sans KR',Arial,sans-serif;color:#fff">
     <div style="font-size:44px;font-weight:800;margin-bottom:40px;text-align:center;letter-spacing:-1px;color:#FFD700">✅ 핵심 성능 포인트</div>
     <div style="font-size:36px;font-weight:600;opacity:0.7;margin-bottom:48px;text-align:center;word-break:keep-all">${productName}</div>
     ${items}
   </div>`
 }
 
-function buildScene3Price(productName: string, scenario: VideoScenario, bgFrom: string, bgTo: string): string {
+function buildScene3Price(productName: string, scenario: VideoScenario, bgFrom: string, bgTo: string, hasProductImage: boolean): string {
   const priceBlock = scenario.originalPrice
     ? `<div style="font-size:44px;font-weight:700;opacity:0.55;text-decoration:line-through;margin-bottom:12px">${scenario.originalPrice}</div>
        <div style="font-size:96px;font-weight:900;color:#FF4757;text-shadow:0 4px 24px rgba(255,71,87,0.6);margin-bottom:24px">${scenario.salePrice}</div>`
     : `<div style="font-size:72px;font-weight:900;color:#FFD700;text-shadow:0 4px 24px rgba(255,215,0,0.5);margin-bottom:24px">${scenario.priceText}</div>`
-  return `<div style="width:1080px;height:1920px;background:linear-gradient(160deg,${bgFrom},${bgTo});display:flex;flex-direction:column;justify-content:center;align-items:center;padding:80px;box-sizing:border-box;font-family:'Apple SD Gothic Neo','Noto Sans KR',Arial,sans-serif;color:#fff;text-align:center">
+  return `<div style="width:1080px;height:1920px;background:${sceneBackground(bgFrom, bgTo, hasProductImage, 0.86)};display:flex;flex-direction:column;justify-content:center;align-items:center;padding:160px 80px 240px;box-sizing:border-box;font-family:'Apple SD Gothic Neo','Noto Sans KR',Arial,sans-serif;color:#fff;text-align:center">
     <div style="font-size:52px;font-weight:800;margin-bottom:48px">💰 지금 이 가격!</div>
     ${priceBlock}
     <div style="font-size:48px;font-weight:700;background:rgba(255,71,87,0.2);border:2px solid rgba(255,71,87,0.6);border-radius:20px;padding:24px 56px">${scenario.priceText}</div>
@@ -339,11 +404,11 @@ function buildScene3Price(productName: string, scenario: VideoScenario, bgFrom: 
   </div>`
 }
 
-function buildScene4CTA(cta: string, bgFrom: string, bgTo: string, affiliateUrl?: string): string {
+function buildScene4CTA(cta: string, bgFrom: string, bgTo: string, affiliateUrl?: string, hasProductImage: boolean = false): string {
   const urlDisplay = affiliateUrl
     ? affiliateUrl.length > 42 ? affiliateUrl.slice(0, 42) + '…' : affiliateUrl
     : null
-  return `<div style="width:1080px;height:1920px;background:linear-gradient(160deg,${bgFrom},${bgTo});display:flex;flex-direction:column;justify-content:center;align-items:center;padding:80px;box-sizing:border-box;font-family:'Apple SD Gothic Neo','Noto Sans KR',Arial,sans-serif;color:#fff;text-align:center">
+  return `<div style="width:1080px;height:1920px;background:${sceneBackground(bgFrom, bgTo, hasProductImage, 0.90)};display:flex;flex-direction:column;justify-content:center;align-items:center;padding:160px 80px 260px;box-sizing:border-box;font-family:'Apple SD Gothic Neo','Noto Sans KR',Arial,sans-serif;color:#fff;text-align:center">
     <div style="font-size:80px;font-weight:900;line-height:1.2;background:linear-gradient(135deg,#FFD700,#FF6B35);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:52px;word-break:keep-all;max-width:940px">${cta}</div>
     <div style="font-size:44px;font-weight:700;background:rgba(255,255,255,0.15);border:2px solid rgba(255,255,255,0.4);padding:28px 64px;border-radius:100px;margin-bottom:${urlDisplay ? '36px' : '0'}">🛒 설명란 링크에서 구매</div>
     ${urlDisplay ? `<div style="font-size:26px;font-weight:500;opacity:0.7;font-family:monospace;background:rgba(0,0,0,0.35);padding:18px 36px;border-radius:16px;max-width:940px;word-break:break-all">${urlDisplay}</div>` : ''}

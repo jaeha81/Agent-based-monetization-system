@@ -41,20 +41,26 @@ const MOCK_RESULT = {
   toolCalls: ['generateJSON(trend_analysis)'],
 }
 
-export async function runTrendAgent(keyword: string, category?: string) {
+export async function runTrendAgent(keyword: string, category?: string, market = 'KR') {
   if (USE_MOCK) {
     await mockDelay()
     return MOCK_RESULT
   }
 
   const existing = await query<{ name: string }>(
-    'SELECT name FROM products ORDER BY id DESC LIMIT 20'
+    'SELECT name FROM products WHERE target_market = ? ORDER BY id DESC LIMIT 20', [market]
   )
   const existingNames = existing.map(p => p.name).join(', ')
+  const marketSignals = await query<{ keyword: string; score: number; total_views: number }>(`
+    SELECT keyword, MAX(score) AS score, MAX(total_views) AS total_views
+    FROM market_trend_keywords WHERE collected_at >= datetime('now', '-3 days') AND region = ?
+    GROUP BY keyword ORDER BY score DESC LIMIT 10
+  `, [market]).catch(() => [])
 
   const userPrompt = `키워드: "${keyword}", 카테고리: ${category || '전체'}
 
 현재 DB에 이미 있는 제품 (중복 금지): ${existingNames || '없음'}
+YouTube 한국 인기 영상에서 추출한 최근 시장 신호: ${marketSignals.map(signal => `${signal.keyword}(${Math.round(signal.score)})`).join(', ') || '수집 전'}
 
 위 키워드/카테고리로 쇼핑숏츠에 적합한 트렌딩 제품 3~5개를 발굴해주세요.
 쿠팡 파트너스 수익 극대화 관점에서 viral_score(0-100)와 estimated_revenue(월 예상 원화 수익)를 산정하세요.`
@@ -65,8 +71,9 @@ export async function runTrendAgent(keyword: string, category?: string) {
     const savedIds: number[] = []
     for (const p of analysis.products) {
       const { lastInsertRowid } = await execute(
-        'INSERT INTO products (name, category, commission_rate, viral_score, estimated_revenue) VALUES (?, ?, ?, ?, ?)',
-        [p.name, p.category, 3.0, p.viral_score, p.estimated_revenue]
+        `INSERT INTO products (name, category, commission_rate, viral_score, estimated_revenue, target_market)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [p.name, p.category, 3.0, p.viral_score, p.estimated_revenue, market]
       )
       savedIds.push(lastInsertRowid)
     }

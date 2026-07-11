@@ -15,9 +15,10 @@ const NAV = [
   { href: '/automation', label: '자동화 제어', icon: Bot },
   { href: '/revenue-structure', label: '수익 구조', icon: BarChart2 },
   { href: '/products', label: '제품 발굴', icon: Search },
+  { href: '/performance', label: '성과 분석', icon: TrendingUp },
   { href: '/content', label: '콘텐츠 생성', icon: FileVideo },
   { href: '/accounts', label: '계정 관리', icon: Users },
-  { href: '/revenue', label: '수익 추적', icon: TrendingUp },
+  { href: '/revenue', label: '수익 추적', icon: BarChart2 },
   { href: '/calendar', label: '콘텐츠 캘린더', icon: Calendar },
   { href: '/setup', label: 'API 설정', icon: Settings },
 ]

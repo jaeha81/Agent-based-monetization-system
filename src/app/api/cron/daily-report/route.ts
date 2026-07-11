@@ -6,8 +6,8 @@ export const runtime = 'nodejs'
 export const maxDuration = 60
 
 function isAuthorized(req: NextRequest): boolean {
-  const secret = req.headers.get('authorization')?.replace('Bearer ', '')
-  return secret === process.env.CRON_SECRET
+  const secret = process.env.CRON_SECRET?.trim()
+  return !!secret && req.headers.get('authorization') === `Bearer ${secret}`
 }
 
 export async function GET(req: NextRequest) {
@@ -22,13 +22,13 @@ export async function GET(req: NextRequest) {
     revenueRow, contentRow, publishedRow,
     topProducts, topPlatforms, failedRow, totalRevenueRow
   ] = await Promise.all([
-    query<{ total: number }>(`SELECT COALESCE(SUM(amount), 0) as total FROM revenue_logs WHERE logged_at >= date('now', '-1 days')`),
+    query<{ total: number }>(`SELECT COALESCE(SUM(amount), 0) as total FROM revenue_events WHERE logged_at >= date('now', '-1 days')`),
     query<{ c: number }>(`SELECT COUNT(*) as c FROM content WHERE created_at >= date('now', '-1 days')`),
     query<{ c: number }>(`SELECT COUNT(*) as c FROM scheduled_posts WHERE status = 'published' AND published_at >= date('now', '-1 days')`),
-    query<{ name: string; revenue: number }>(`SELECT p.name, SUM(c.revenue) as revenue FROM content c JOIN products p ON c.product_id = p.id WHERE c.posted_at >= date('now', '-1 days') GROUP BY p.id ORDER BY revenue DESC LIMIT 3`),
-    query<{ platform: string; revenue: number }>(`SELECT platform, SUM(revenue) as revenue FROM content WHERE posted_at >= date('now', '-1 days') GROUP BY platform ORDER BY revenue DESC LIMIT 3`),
+    query<{ name: string; revenue: number }>(`SELECT p.name, SUM(re.amount) revenue FROM revenue_events re JOIN products p ON p.id = re.product_id WHERE re.logged_at >= date('now', '-1 days') GROUP BY p.id ORDER BY revenue DESC LIMIT 3`),
+    query<{ platform: string; revenue: number }>(`SELECT platform, SUM(amount) revenue FROM revenue_events WHERE logged_at >= date('now', '-1 days') GROUP BY platform ORDER BY revenue DESC LIMIT 3`),
     query<{ c: number }>(`SELECT COUNT(*) as c FROM scheduled_posts WHERE status = 'failed' AND updated_at >= date('now', '-1 days') OR error IS NOT NULL AND scheduled_for >= date('now', '-1 days')`),
-    query<{ total: number }>(`SELECT COALESCE(SUM(amount), 0) as total FROM revenue_logs`),
+    query<{ total: number }>(`SELECT COALESCE(SUM(amount), 0) as total FROM revenue_events`),
   ])
 
   const todayRevenue = revenueRow[0]?.total ?? 0

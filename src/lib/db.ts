@@ -5,6 +5,7 @@ import fs from 'fs'
 const isVercel = !!process.env.VERCEL
 const TURSO_URL = process.env.TURSO_DATABASE_URL
 const TURSO_AUTH_TOKEN = process.env.TURSO_AUTH_TOKEN
+export const SCHEMA_VERSION = 20260728
 
 function getDbUrl(): string {
   if (TURSO_URL) return TURSO_URL
@@ -221,6 +222,32 @@ const BRAIN_PROBLEMS_SCHEMA = `CREATE TABLE IF NOT EXISTS brain_problems (
   detected_at TEXT DEFAULT (datetime('now'))
 )`
 
+const MARKET_TRENDS_SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS market_trend_videos (source TEXT NOT NULL, region TEXT NOT NULL, external_id TEXT NOT NULL, title TEXT NOT NULL, view_count INTEGER DEFAULT 0, like_count INTEGER DEFAULT 0, shopping_relevant INTEGER DEFAULT 0, collected_at TEXT DEFAULT (datetime('now')), PRIMARY KEY(source, region, external_id))`,
+  `CREATE TABLE IF NOT EXISTS market_trend_keywords (id INTEGER PRIMARY KEY AUTOINCREMENT, keyword TEXT NOT NULL, region TEXT NOT NULL, source TEXT NOT NULL, signal_count INTEGER DEFAULT 0, total_views INTEGER DEFAULT 0, score REAL DEFAULT 0, collected_at TEXT DEFAULT (datetime('now')))`
+]
+
+const MUSIC_SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS music_tracks (id TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT NOT NULL, url TEXT NOT NULL, license TEXT NOT NULL, attribution TEXT NOT NULL, commercial_use INTEGER DEFAULT 0, active INTEGER DEFAULT 1, uses INTEGER DEFAULT 0, avg_retention REAL DEFAULT 0, avg_click_rate REAL DEFAULT 0, performance_score REAL DEFAULT 0)`,
+  `CREATE TABLE IF NOT EXISTS music_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, assignment_key TEXT NOT NULL, music_track_id TEXT NOT NULL REFERENCES music_tracks(id), assigned_at TEXT DEFAULT (datetime('now')))`,
+  `INSERT OR IGNORE INTO music_tracks (id,title,artist,url,license,attribution,commercial_use) VALUES ('americana','Americana','Kevin MacLeod','https://incompetech.com/music/royalty-free/mp3-royaltyfree/Americana.mp3','CC BY 3.0','Americana — Kevin MacLeod (incompetech.com), CC BY 3.0',1)`,
+  `INSERT OR IGNORE INTO music_tracks (id,title,artist,url,license,attribution,commercial_use) VALUES ('beach-party','Beach Party','Kevin MacLeod','https://incompetech.com/music/royalty-free/mp3-royaltyfree/Beach%20Party.mp3','CC BY 3.0','Beach Party — Kevin MacLeod (incompetech.com), CC BY 3.0',1)`,
+  `INSERT OR IGNORE INTO music_tracks (id,title,artist,url,license,attribution,commercial_use) VALUES ('bright-wish','Bright Wish','Kevin MacLeod','https://incompetech.com/music/royalty-free/mp3-royaltyfree/Bright%20Wish.mp3','CC BY 3.0','Bright Wish — Kevin MacLeod (incompetech.com), CC BY 3.0',1)`,
+  `INSERT OR IGNORE INTO music_tracks (id,title,artist,url,license,attribution,commercial_use) VALUES ('cool-vibes','Cool Vibes','Kevin MacLeod','https://incompetech.com/music/royalty-free/mp3-royaltyfree/Cool%20Vibes.mp3','CC BY 3.0','Cool Vibes — Kevin MacLeod (incompetech.com), CC BY 3.0',1)`
+]
+
+const PROFIT_SCHEMA = `CREATE TABLE IF NOT EXISTS content_costs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, content_id INTEGER NOT NULL REFERENCES content(id),
+  cost_type TEXT NOT NULL, amount INTEGER NOT NULL, metadata TEXT, created_at TEXT DEFAULT (datetime('now'))
+)`
+const WEBHOOK_EVENTS_SCHEMA = `CREATE TABLE IF NOT EXISTS webhook_events (
+  provider TEXT NOT NULL, event_key TEXT NOT NULL, received_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY(provider, event_key)
+)`
+const MIGRATIONS_SCHEMA = `CREATE TABLE IF NOT EXISTS schema_migrations (
+  id INTEGER PRIMARY KEY, sql_hash TEXT NOT NULL, applied_at TEXT DEFAULT (datetime('now'))
+)`
+
 const MIGRATIONS = [
   `ALTER TABLE content ADD COLUMN video_url TEXT`,
   `ALTER TABLE content ADD COLUMN target_market TEXT DEFAULT 'KR'`,
@@ -246,6 +273,21 @@ const MIGRATIONS = [
   `ALTER TABLE content ADD COLUMN image_url TEXT`,
   `ALTER TABLE content ADD COLUMN render_status TEXT DEFAULT 'idle'`,
   `ALTER TABLE products ADD COLUMN approved INTEGER DEFAULT 1`,
+  `ALTER TABLE scheduled_posts ADD COLUMN qa_status TEXT DEFAULT 'pending'`,
+  `ALTER TABLE scheduled_posts ADD COLUMN visibility TEXT DEFAULT 'private'`,
+  `ALTER TABLE scheduled_posts ADD COLUMN qa_score INTEGER DEFAULT 0`,
+  `ALTER TABLE scheduled_posts ADD COLUMN qa_details TEXT`,
+  `ALTER TABLE content ADD COLUMN likes INTEGER DEFAULT 0`,
+  `ALTER TABLE content ADD COLUMN comments INTEGER DEFAULT 0`,
+  `ALTER TABLE content ADD COLUMN avg_view_duration REAL DEFAULT 0`,
+  `ALTER TABLE content ADD COLUMN avg_view_percentage REAL DEFAULT 0`,
+  `ALTER TABLE content ADD COLUMN performance_score REAL DEFAULT 0`,
+  `ALTER TABLE products ADD COLUMN performance_score REAL DEFAULT 0`,
+  `ALTER TABLE products ADD COLUMN total_views INTEGER DEFAULT 0`,
+  `ALTER TABLE products ADD COLUMN total_clicks INTEGER DEFAULT 0`,
+  `ALTER TABLE products ADD COLUMN avg_retention REAL DEFAULT 0`,
+  `ALTER TABLE products ADD COLUMN last_performance_sync_at TEXT`,
+  `ALTER TABLE content ADD COLUMN music_track_id TEXT`,
   `CREATE TABLE IF NOT EXISTS manual_revenue_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     platform TEXT NOT NULL,
@@ -255,20 +297,149 @@ const MIGRATIONS = [
     note TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   )`,
+  `ALTER TABLE manual_revenue_entries ADD COLUMN product_id INTEGER`,
+  `ALTER TABLE manual_revenue_entries ADD COLUMN content_id INTEGER`,
+  `ALTER TABLE products ADD COLUMN actual_revenue INTEGER DEFAULT 0`,
+  `ALTER TABLE products ADD COLUMN total_cost INTEGER DEFAULT 0`,
+  `ALTER TABLE products ADD COLUMN net_profit INTEGER DEFAULT 0`,
+  `ALTER TABLE products ADD COLUMN profit_score REAL DEFAULT 0`,
+  `ALTER TABLE content ADD COLUMN render_provider TEXT`,
+  `ALTER TABLE content ADD COLUMN video_width INTEGER`,
+  `ALTER TABLE content ADD COLUMN video_height INTEGER`,
+  `ALTER TABLE content ADD COLUMN video_duration_seconds REAL`,
+  `ALTER TABLE products ADD COLUMN selection_score REAL DEFAULT 0`,
+  `ALTER TABLE products ADD COLUMN decision_confidence REAL DEFAULT 0`,
+  `ALTER TABLE products ADD COLUMN decision_action TEXT DEFAULT 'learn'`,
+  `ALTER TABLE products ADD COLUMN decision_reason TEXT`,
+  `ALTER TABLE products ADD COLUMN decision_updated_at TEXT`,
+  `ALTER TABLE products ADD COLUMN market_trend_score REAL DEFAULT 0`,
+  `ALTER TABLE products ADD COLUMN market_trend_reason TEXT`,
+  `ALTER TABLE products ADD COLUMN market_trend_updated_at TEXT`,
+  `ALTER TABLE manual_revenue_entries ADD COLUMN external_id TEXT`,
+  `ALTER TABLE manual_revenue_entries ADD COLUMN event_type TEXT DEFAULT 'commission'`,
+  `ALTER TABLE manual_revenue_entries ADD COLUMN currency TEXT DEFAULT 'KRW'`,
+  `ALTER TABLE manual_revenue_entries ADD COLUMN occurred_at TEXT`,
+  `ALTER TABLE manual_revenue_entries ADD COLUMN settlement_status TEXT DEFAULT 'settled'`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_manual_revenue_external
+   ON manual_revenue_entries(platform, source, external_id, event_type)`,
+  `ALTER TABLE music_assignments ADD COLUMN content_id INTEGER REFERENCES content(id)`,
+  `ALTER TABLE music_assignments ADD COLUMN explore INTEGER DEFAULT 0`,
+  `ALTER TABLE music_assignments ADD COLUMN propensity REAL DEFAULT 1`,
+  `ALTER TABLE music_assignments ADD COLUMN policy_version TEXT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_music_assignment_content ON music_assignments(content_id)`,
+  `ALTER TABLE content ADD COLUMN metrics_source TEXT`,
+  `ALTER TABLE content ADD COLUMN metrics_window_start TEXT`,
+  `ALTER TABLE content ADD COLUMN metrics_window_end TEXT`,
+  `CREATE VIEW IF NOT EXISTS revenue_events AS
+   SELECT id, NULL AS account_id, content_id, product_id, platform, amount,
+          event_type AS commission_type, COALESCE(occurred_at, created_at) AS logged_at
+   FROM manual_revenue_entries WHERE COALESCE(settlement_status, 'settled') = 'settled'`,
+  `DELETE FROM content_costs WHERE metadata IS NOT NULL AND id NOT IN (
+     SELECT MIN(id) FROM content_costs WHERE metadata IS NOT NULL GROUP BY content_id, cost_type, metadata
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_content_cost_event
+   ON content_costs(content_id, cost_type, metadata)`,
+  `ALTER TABLE music_tracks ADD COLUMN observed_videos INTEGER DEFAULT 0`,
+  `ALTER TABLE music_tracks ADD COLUMN observed_views INTEGER DEFAULT 0`,
+  `ALTER TABLE music_tracks ADD COLUMN evidence_confidence REAL DEFAULT 0`,
+  `ALTER TABLE content ADD COLUMN last_analytics_success_at TEXT`,
+  `ALTER TABLE content ADD COLUMN engaged_views INTEGER DEFAULT 0`,
+  `ALTER TABLE products ADD COLUMN total_engaged_views INTEGER DEFAULT 0`,
+  `CREATE TABLE IF NOT EXISTS youtube_metric_snapshots (
+     content_id INTEGER NOT NULL REFERENCES content(id), snapshot_date TEXT NOT NULL,
+     window_start TEXT NOT NULL, window_end TEXT NOT NULL, views INTEGER DEFAULT 0,
+     engaged_views INTEGER DEFAULT 0, likes INTEGER DEFAULT 0, clicks INTEGER DEFAULT 0,
+     avg_view_duration REAL DEFAULT 0, avg_view_percentage REAL DEFAULT 0,
+     collected_at TEXT DEFAULT (datetime('now')),
+     PRIMARY KEY(content_id, snapshot_date, window_start)
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_click_dedupe ON click_logs(content_id, ip_hash, clicked_at)`,
+  `ALTER TABLE products ADD COLUMN revenue_data_complete_through TEXT`,
+  `ALTER TABLE market_trend_videos ADD COLUMN view_velocity REAL DEFAULT 0`,
+  `ALTER TABLE market_trend_keywords ADD COLUMN growth_score REAL DEFAULT 0`,
+  `CREATE TABLE IF NOT EXISTS market_trend_snapshots (
+     id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, region TEXT NOT NULL,
+     external_id TEXT NOT NULL, view_count INTEGER DEFAULT 0, like_count INTEGER DEFAULT 0,
+     collected_at TEXT DEFAULT (datetime('now'))
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_market_snapshot_lookup
+   ON market_trend_snapshots(source, region, external_id, collected_at)`,
+  `CREATE TABLE IF NOT EXISTS experiment_assignments (
+     id INTEGER PRIMARY KEY AUTOINCREMENT, assignment_key TEXT NOT NULL,
+     entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, arm TEXT NOT NULL,
+     policy_version TEXT NOT NULL, propensity REAL NOT NULL, context_json TEXT,
+     assigned_at TEXT DEFAULT (datetime('now')), outcome_window_end TEXT,
+     UNIQUE(assignment_key, entity_type, entity_id)
+   )`,
+  `DROP VIEW IF EXISTS revenue_events`,
+  `CREATE VIEW revenue_events AS
+   SELECT m.id, NULL AS account_id, m.content_id,
+          COALESCE(m.product_id, (SELECT c.product_id FROM content c WHERE c.id = m.content_id)) AS product_id,
+          m.platform, m.amount, m.event_type AS commission_type,
+          COALESCE(m.occurred_at, m.created_at) AS logged_at
+   FROM manual_revenue_entries m WHERE COALESCE(m.settlement_status, 'settled') = 'settled'`,
+  `ALTER TABLE content ADD COLUMN last_retention_success_at TEXT`,
+  `CREATE TABLE IF NOT EXISTS youtube_retention_points (
+     content_id INTEGER NOT NULL REFERENCES content(id), window_start TEXT NOT NULL,
+     window_end TEXT NOT NULL, elapsed_ratio REAL NOT NULL, audience_watch_ratio REAL DEFAULT 0,
+     relative_retention REAL DEFAULT 0, collected_at TEXT DEFAULT (datetime('now')),
+     PRIMARY KEY(content_id, window_start, elapsed_ratio)
+   )`,
 ]
 
 async function initSchema(client: Client): Promise<void> {
   await client.batch(SCHEMA_STMTS.map(sql => ({ sql, args: [] })), 'write')
-  try { await client.execute(WORKFLOW_JOBS_SCHEMA) } catch { /* already exists */ }
-  try { await client.execute(BRAIN_PROBLEMS_SCHEMA) } catch { /* already exists */ }
+  await client.execute(WORKFLOW_JOBS_SCHEMA)
+  await client.execute(BRAIN_PROBLEMS_SCHEMA)
+  for (const sql of MARKET_TRENDS_SCHEMA) await client.execute(sql)
+  for (const sql of MUSIC_SCHEMA) await client.execute(sql)
+  await client.execute(PROFIT_SCHEMA)
+  await client.execute(WEBHOOK_EVENTS_SCHEMA)
+  await client.execute(MIGRATIONS_SCHEMA)
 
-  for (const sql of MIGRATIONS) {
-    try { await client.execute(sql) } catch { /* column/row already exists */ }
-  }
+  for (let index = 0; index < MIGRATIONS.length; index++) await applyMigration(client, index + 1, MIGRATIONS[index])
+  await client.execute({
+    sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('schema_version', ?, datetime('now'))",
+    args: [String(SCHEMA_VERSION)],
+  })
 
   const countRow = await client.execute('SELECT COUNT(*) as c FROM accounts')
   const count = Number((countRow.rows[0] as unknown as { c: number }).c)
   if (count === 0) await seedAccounts(client)
+}
+
+async function applyMigration(client: Client, id: number, sql: string): Promise<void> {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sql))
+  const sqlHash = Array.from(new Uint8Array(hash)).map(byte => byte.toString(16).padStart(2, '0')).join('').slice(0, 16)
+  const applied = await client.execute({ sql: 'SELECT id, sql_hash FROM schema_migrations WHERE id = ?', args: [id] })
+  if (applied.rows.length > 0) {
+    if (String(applied.rows[0].sql_hash) !== sqlHash) throw new Error(`DB migration ${id} checksum mismatch`)
+    return
+  }
+  try {
+    await client.execute(sql)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!/duplicate column name|already exists/i.test(message)) {
+      throw new Error(`DB migration ${id} failed: ${message}`)
+    }
+  }
+  await client.execute({ sql: 'INSERT INTO schema_migrations (id, sql_hash) VALUES (?, ?)', args: [id, sqlHash] })
+}
+
+export async function getDatabaseDiagnostics(): Promise<{ schemaVersion: number; expectedVersion: number; migrationCount: number; latencyMs: number }> {
+  const started = Date.now()
+  const client = await ensureInit()
+  const [version, migrations] = await Promise.all([
+    client.execute("SELECT value FROM settings WHERE key = 'schema_version'"),
+    client.execute('SELECT COUNT(*) AS count FROM schema_migrations'),
+  ])
+  return {
+    schemaVersion: Number(version.rows[0]?.value || 0),
+    expectedVersion: SCHEMA_VERSION,
+    migrationCount: Number(migrations.rows[0]?.count || 0),
+    latencyMs: Date.now() - started,
+  }
 }
 
 async function seedAccounts(client: Client): Promise<void> {
@@ -355,5 +526,7 @@ export type ScheduledPost = {
   youtube_video_id: string | null
   published_at: string | null
   error: string | null
+  qa_status: string
+  visibility: string
   created_at: string
 }
