@@ -3,6 +3,7 @@ import { searchTrendingProducts, generateAffiliateLink } from '@/lib/coupang'
 import { runContentAgent } from '@/lib/agents/content-agent'
 import { submitShotstackScenicRender, pollShotstackRender } from '@/lib/shotstack'
 import { generateVideoScenario } from '@/lib/agents/scenario-agent'
+import { validateContentCopy } from '@/lib/agents/content-agent'
 import { generateProductImage, buildProductImagePrompt } from '@/lib/agents/image-agent'
 import { uploadYouTubeShorts, buildShortsDescription, buildShortsTags } from '@/lib/youtube'
 import { submitVeoJob, buildVeoPrompt, downloadVeoVideo, pollVeoJob, isVeoRender } from '@/lib/agents/veo-agent'
@@ -277,6 +278,7 @@ async function nodeVideoRender(
     [input.contentId]
   )
   if (!content) throw new Error(`Content ${input.contentId} not found`)
+  validateContentCopy(content.product_name, content.hook, content.script)
 
   const hasVeo = !!process.env.GEMINI_API_KEY
   const hasShotstack = !!process.env.SHOTSTACK_API_KEY
@@ -406,6 +408,7 @@ async function nodeYouTubeUpload(
     [input.contentId]
   )
   if (!content) throw new Error(`Content ${input.contentId} not found`)
+  validateContentCopy(content.product_name, content.hook, content.script)
 
   const tags = buildShortsTags(content.product_name, content.category)
   requireAffiliateUrl(content.coupang_url)

@@ -9,6 +9,29 @@ const PROHIBITED_EXPRESSIONS_KO = [
   '효과 보장', '완치', '100% 효과', '부작용 없음', '과학적으로 증명',
 ]
 
+
+// Reject claims that require evidence not present in the product record.
+const UNSUPPORTED_CLAIMS_KO = [
+  '80%', '90%', '100%', '최저가', '품절', '품절 직전', '전문가도 인정', '의사도 추천',
+  '소아과 의사', '2만명', '4.9점', '무조건', '완벽', '제로', 'BPA 프리', '효과 보장',
+]
+
+function validateProductAlignment(productName: string, item: ContentItem): void {
+  const combined = `${item.hook || ''} ${item.script || ''} ${item.image_prompt || ''}`.toLowerCase()
+  const productTokens = productName.toLowerCase()
+    .split(/\s+/)
+    .map(token => token.replace(/[^a-z0-9가-힣]/gi, ''))
+    .filter(token => token.length >= 2)
+  if (productTokens.length > 0 && !productTokens.some(token => combined.includes(token))) {
+    throw new Error(`[Compliance CNT-02] 상품명과 대본이 일치하지 않습니다: ${productName}`)
+  }
+  const unsupported = UNSUPPORTED_CLAIMS_KO.find(claim => combined.includes(claim.toLowerCase()))
+  if (unsupported) throw new Error(`[Compliance CNT-03] 근거 없는 상품 주장이 포함되었습니다: ${unsupported}`)
+}
+
+export function validateContentCopy(productName: string, hook: string | null, script: string | null): void {
+  validateProductAlignment(productName, { platform: '', hook: hook || '', script: script || '', image_prompt: '' })
+}
 const PLATFORMS_BY_MARKET: Record<string, string[]> = {
   KR: ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'Threads', 'Naver'],
   US: ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'Pinterest', 'Twitter'],
@@ -166,7 +189,7 @@ function buildMockContents(productName: string, language: string) {
   return platforms.map((platform, i) => ({
     platform,
     hook: selectedHooks[i] || selectedHooks[0],
-    script: `${productName} 완전 꿀템이에요! 가격 대비 퀄리티 최상. 지금 설명란 링크에서 확인하세요!`,
+    script: `${productName}의 특징과 활용 방법을 간단히 소개합니다. 구매 전 상품 페이지에서 구성과 최신 정보를 확인해 보세요.`,
     image_prompt: `Clean product photography of ${productName}, white background, professional studio lighting, Korean e-commerce style`,
   }))
 }
@@ -226,6 +249,9 @@ Disclosure to include: ${disclosure}`
     }
   }
 
+  for (const c of batch.contents) {
+    validateProductAlignment(productName, c)
+  }
   const savedIds: number[] = []
   for (const c of batch.contents) {
     const { lastInsertRowid } = await execute(
