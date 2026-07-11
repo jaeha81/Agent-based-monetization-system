@@ -1,7 +1,7 @@
 const encoder = new TextEncoder()
 
 async function sign(value: string): Promise<string> {
-  const secret = process.env.TTS_SIGNING_SECRET || process.env.CRON_SECRET
+  const secret = process.env.TTS_SIGNING_SECRET
   if (!secret) throw new Error('TTS_SIGNING_SECRET 미설정')
   const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const bytes = new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(value)))
