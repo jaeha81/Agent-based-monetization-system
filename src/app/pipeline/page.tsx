@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, CheckCircle, XCircle, Clock, Loader2, Upload, Video, Search, FileText, Activity } from 'lucide-react'
+import { RefreshCw, CheckCircle, XCircle, Clock, Loader2, Upload, Video, Search, FileText, Activity, ExternalLink } from 'lucide-react'
 
 interface WorkflowJob {
   id: number
@@ -38,6 +38,7 @@ interface ContentRow {
   render_status: string | null
   upload_status: string | null
   youtube_url: string | null
+  video_url: string | null
   qa_score: number | null
   created_at: string
 }
@@ -238,6 +239,16 @@ export default function PipelinePage() {
                     className="text-[10px] text-indigo-400 hover:underline mt-0.5 block truncate">
                     {c.youtube_url}
                   </a>
+                )}
+                {c.video_url && (
+                  <div className="mt-3 overflow-hidden rounded-lg border border-gray-700 bg-black">
+                    <video controls playsInline preload="metadata" className="max-h-[65vh] w-full bg-black" src={c.video_url}>
+                      이 브라우저에서는 영상 미리보기를 지원하지 않습니다.
+                    </video>
+                    <a href={c.video_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 px-3 py-2 text-xs text-indigo-300 hover:text-white">
+                      <ExternalLink size={13} /> 새 창에서 영상 열기
+                    </a>
+                  </div>
                 )}
               </div>
             ))}

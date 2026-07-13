@@ -28,18 +28,18 @@ export async function GET() {
       // 렌더/업로드 현황 있는 최근 콘텐츠
       query(`
         SELECT c.id, c.hook, c.platform, c.render_status, c.upload_status,
-               c.youtube_url, c.created_at,
+               c.youtube_url, c.video_url, c.created_at,
                p.name as product_name
         FROM content c
         LEFT JOIN products p ON c.product_id = p.id
-        WHERE c.render_status IS NOT NULL AND c.render_status != 'idle'
+        WHERE (c.render_status IS NOT NULL AND c.render_status != 'idle') OR c.video_url IS NOT NULL
         ORDER BY c.id DESC
         LIMIT 15
       `).catch(() =>
         // render_status 컬럼 없을 경우 fallback
         query(`
           SELECT c.id, c.hook, c.platform, c.status as render_status,
-                 NULL as upload_status, c.video_url as youtube_url, c.created_at,
+                 NULL as upload_status, c.video_url as youtube_url, c.video_url, c.created_at,
                  p.name as product_name
           FROM content c
           LEFT JOIN products p ON c.product_id = p.id
