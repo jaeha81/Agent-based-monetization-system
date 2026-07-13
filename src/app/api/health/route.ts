@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
   checks.youtube = { ok: configuration.configured.YOUTUBE_CLIENT_ID && configuration.configured.YOUTUBE_CLIENT_SECRET && configuration.configured.YOUTUBE_REFRESH_TOKEN }
   checks.youtubeTrends = { ok: configuration.configured.YOUTUBE_API_KEY }
   checks.shotstack = { ok: configuration.configured.SHOTSTACK_API_KEY && process.env.SHOTSTACK_STAGE === 'v1' }
+  checks.localRenderer = { ok: !!process.env.LOCAL_RENDER_URL && !!process.env.LOCAL_RENDER_TOKEN }
   checks.tts = { ok: (configuration.configured.GOOGLE_TTS_API_KEY || configuration.configured.LOCAL_TTS_URL) && configuration.configured.TTS_SIGNING_SECRET }
   checks.operationalDb = { ok: configuration.configured.TURSO_DATABASE_URL && configuration.configured.TURSO_AUTH_TOKEN }
   checks.affiliateTracking = { ok: checks.coupang.ok && !!process.env.COUPANG_SUB_ID }
@@ -42,7 +43,8 @@ export async function GET(req: NextRequest) {
   checks.tistory = { ok: !!process.env.TISTORY_ACCESS_TOKEN }
   checks.discord = { ok: !!process.env.SHORTS_DISCORD_WEBHOOK }
 
-  const allOk = checks.db.ok && configuration.ok && checks.shotstack.ok && checks.tts.ok
+  const videoEngineOk = checks.localRenderer.ok || checks.shotstack.ok
+  const allOk = checks.db.ok && checks.tts.ok && videoEngineOk
   const status = allOk ? 200 : 503
 
   const detailed = await isAdminRequest(req)

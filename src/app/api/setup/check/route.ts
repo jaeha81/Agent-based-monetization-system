@@ -35,6 +35,8 @@ export async function GET(req: NextRequest) {
     GOOGLE_TTS_API_KEY: !!process.env.GOOGLE_TTS_API_KEY,
     LOCAL_TTS_URL: !!process.env.LOCAL_TTS_URL,
     LOCAL_TTS_TOKEN: !!process.env.LOCAL_TTS_TOKEN,
+    LOCAL_RENDER_URL: !!process.env.LOCAL_RENDER_URL,
+    LOCAL_RENDER_TOKEN: !!process.env.LOCAL_RENDER_TOKEN,
     YOUTUBE_API_KEY: !!(process.env.YOUTUBE_API_KEY || process.env.GOOGLE_API_KEY),
     TURSO_DATABASE_URL: !!process.env.TURSO_DATABASE_URL,
     TURSO_AUTH_TOKEN: !!process.env.TURSO_AUTH_TOKEN,
@@ -48,7 +50,9 @@ export async function GET(req: NextRequest) {
   const youtubeReady = keys.YOUTUBE_CLIENT_ID && keys.YOUTUBE_CLIENT_SECRET && keys.YOUTUBE_REFRESH_TOKEN
   const databaseReady = keys.TURSO_DATABASE_URL && keys.TURSO_AUTH_TOKEN
   const ttsReady = (keys.GOOGLE_TTS_API_KEY || keys.LOCAL_TTS_URL) && (!keys.LOCAL_TTS_URL || keys.LOCAL_TTS_TOKEN)
-  const videoReady = youtubeReady && keys.SHOTSTACK_API_KEY && ttsReady && keys.SHOTSTACK_WEBHOOK_SECRET && keys.TTS_SIGNING_SECRET
+  const localRenderReady = keys.LOCAL_RENDER_URL && keys.LOCAL_RENDER_TOKEN
+  const shotstackReady = keys.SHOTSTACK_API_KEY && keys.SHOTSTACK_WEBHOOK_SECRET
+  const videoReady = youtubeReady && (localRenderReady || shotstackReady) && ttsReady && keys.TTS_SIGNING_SECRET
   const marketTrendReady = keys.YOUTUBE_API_KEY
   const uploadReady = keys.UPLOAD_SECRET
   const allRequired = configuration.ok
