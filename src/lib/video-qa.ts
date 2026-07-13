@@ -51,7 +51,7 @@ export async function runAutomatedVideoQa(contentId: number, videoBuffer?: Buffe
     { name: 'product_image', passed: !!productImageUrl?.startsWith('https://'), detail: productImageUrl ? 'HTTPS product image' : 'missing product image' },
     { name: 'vertical_format', passed: width > 0 && height > 0 && Math.abs(width / height - 9 / 16) <= 0.01, detail: mediaError || `${width || '?'}x${height || '?'}` },
     { name: 'shorts_duration', passed: duration >= 8 && duration <= 60, detail: duration ? `${duration}s` : 'missing duration metadata' },
-    { name: 'render_provider', passed: ['shotstack', 'veo', 'manual_verified'].includes(content.render_provider || ''), detail: content.render_provider || 'unknown provider' },
+    { name: 'render_provider', passed: ['shotstack', 'veo', 'local', 'manual_verified'].includes(content.render_provider || ''), detail: content.render_provider || 'unknown provider' },
     { name: 'affiliate_link', passed: affiliatePassed, detail: affiliateDetail },
     { name: 'narration', passed: !!process.env.GOOGLE_TTS_API_KEY && scriptLength >= 40, detail: `TTS 설정=${!!process.env.GOOGLE_TTS_API_KEY}, 대본=${scriptLength}자` },
     { name: 'video_payload', passed: !!videoBuffer && videoBuffer.length >= 100_000 && !!mediaMetadata?.hasVideoTrack, detail: mediaError || (videoBuffer ? `${Math.round(videoBuffer.length / 1024)}KB` : '영상 바이트 확인 불가') },

@@ -13,6 +13,7 @@ import { postTikTokVideo } from '@/lib/tiktok'
 import { PRIVATE_UPLOAD_STATUS, buildTrackedAffiliateUrl, requireAffiliateUrl } from '@/lib/publishing-safety'
 import { runAutomatedVideoQa } from '@/lib/video-qa'
 import { recordContentCost } from '@/lib/profitability'
+import { submitLocalRender } from '@/lib/local-renderer'
 import { refreshProductDecisions, selectProductCandidates } from '@/lib/product-selection'
 import { refreshProductTrendScores } from '@/lib/trend-product-matcher'
 
@@ -282,8 +283,9 @@ async function nodeVideoRender(
 
   const hasVeo = !!process.env.GEMINI_API_KEY
   const hasShotstack = !!process.env.SHOTSTACK_API_KEY
+  const hasLocal = !!process.env.LOCAL_RENDER_URL
 
-  if (!hasVeo && !hasShotstack) {
+  if (!hasVeo && !hasShotstack && !hasLocal) {
     await completeJob(jobId, { skipped: true, reason: 'no_video_engine' })
     await createJob(workflowName, 'schedule_post', { contentId: input.contentId, platform: 'YouTube' }, triggerType)
     return
@@ -308,6 +310,24 @@ async function nodeVideoRender(
       content.product_name,
     ),
   ])
+
+  if (hasLocal) {
+    const local = await submitLocalRender({
+      contentId: input.contentId,
+      productName: content.product_name,
+      title: scenario.hook || content.hook || content.product_name,
+      hook: content.hook || scenario.hook || '',
+      script: content.script || scenario.ttsScript || scenario.hook || content.product_name,
+      imageUrl: imageUrl || undefined,
+      language,
+    })
+    await execute(`UPDATE content SET render_id = ?, image_url = ?, render_provider = ?, video_url = ?, video_width = 1080, video_height = 1920, video_duration_seconds = 15 WHERE id = ?`, [local.id, imageUrl, 'local', local.videoUrl, input.contentId])
+    await recordContentCost(input.contentId, 'tts', local.id)
+    await completeJob(jobId, { renderId: local.id, videoUrl: local.videoUrl, provider: 'local' })
+    const childId = await createJob(workflowName, 'youtube_upload', { contentId: input.contentId, videoUrl: local.videoUrl }, triggerType)
+    await processJob(childId)
+    return
+  }
 
   // ① Veo 우선 (Gemini Pro 구독 기반), ② Shotstack 폴백
   let renderId: string
