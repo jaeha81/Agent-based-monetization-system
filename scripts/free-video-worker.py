@@ -2,6 +2,7 @@
 import json, os, subprocess, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1] / "data" / "local-renders"; ROOT.mkdir(parents=True, exist_ok=True)
 TOKEN = os.getenv("LOCAL_RENDER_TOKEN", ""); FONT = "C:/Windows/Fonts/malgun.ttf"
@@ -12,9 +13,17 @@ def render(body):
     (folder / "script.txt").write_text(str(body.get("script") or body.get("hook") or "상품 정보를 확인하세요")[:180], encoding="utf-8")
     def fp(p): return str(p).replace("\\", "/").replace(":", "\\:")
     vf = f"drawtext=fontfile='{fp(FONT)}':textfile='{fp(folder/'title.txt')}':fontcolor=white:fontsize=72:x=80:y=500,drawtext=fontfile='{fp(FONT)}':text='오늘의 쇼츠 추천':fontcolor=0x78e6cd:fontsize=34:x=80:y=300,drawtext=fontfile='{fp(FONT)}':textfile='{fp(folder/'script.txt')}':fontcolor=0xdce6f5:fontsize=46:x=80:y=900"
-    frame = folder / "frame.png"; out = folder / "video.mp4"
+    frame = folder / "frame.png"; out = folder / "video.mp4"; audio = folder / "narration.wav"
     subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x121828:s=1080x1920", "-frames:v", "1", "-vf", vf, str(frame)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["ffmpeg", "-y", "-loop", "1", "-i", str(frame), "-t", "15", "-vf", "format=yuv420p", "-r", "30", "-c:v", "libx264", "-movflags", "+faststart", str(out)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    tts_url, tts_token = os.getenv("LOCAL_TTS_URL", ""), os.getenv("LOCAL_TTS_TOKEN", "")
+    if tts_url and tts_token:
+        req = Request(tts_url.rstrip("/") + "/synthesize", data=json.dumps({"text": (folder / "script.txt").read_text(encoding="utf-8")}).encode(), headers={"Content-Type": "application/json", "Authorization": "Bearer " + tts_token}, method="POST")
+        with urlopen(req, timeout=45) as response: audio.write_bytes(response.read())
+    video = ["ffmpeg", "-y", "-loop", "1", "-i", str(frame)]
+    if audio.exists(): video += ["-i", str(audio)]
+    video += ["-t", "15"]
+    video += ["-vf", "format=yuv420p", "-r", "30", "-c:v", "libx264", "-b:v", "1000k", "-minrate", "1000k", "-maxrate", "1000k", "-bufsize", "2000k", "-c:a", "aac", "-movflags", "+faststart", str(out)]
+    subprocess.run(video, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return rid
 
 class Handler(BaseHTTPRequestHandler):
